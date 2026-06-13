@@ -103,7 +103,7 @@ def _run_analyst(client, system: str, ticker: str, data_block: str, max_tokens: 
     try:
         import anthropic
         response = client.messages.create(
-            model="claude-opus-4-5",
+            model="claude-sonnet-4-6",
             max_tokens=max_tokens,
             system=system,
             messages=[{

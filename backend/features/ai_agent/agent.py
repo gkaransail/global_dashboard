@@ -433,7 +433,7 @@ def _run_agentic_loop(client, messages: list, system: str, max_tokens: int = 204
 
     for _ in range(max_iterations):
         response = client.messages.create(
-            model="claude-opus-4-5",
+            model="claude-sonnet-4-6",
             max_tokens=max_tokens,
             system=system,
             tools=TOOLS,
@@ -517,7 +517,7 @@ def generate_summary(ticker: str) -> dict:
 
     try:
         response = client.messages.create(
-            model="claude-opus-4-5",
+            model="claude-sonnet-4-6",
             max_tokens=1024,
             system=system,
             messages=messages,

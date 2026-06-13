@@ -1,0 +1,40 @@
+services:
+
+  # ─── Backend ─────────────────────────────────────────────────────────────────
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: financeiq_api
+    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+    env_file: ./backend/.env
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Frontend ────────────────────────────────────────────────────────────────
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: financeiq_frontend
+    restart: unless-stopped
+    environment:
+      - VITE_BACKEND_URL=http://localhost:8001
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      api:
+        condition: service_healthy

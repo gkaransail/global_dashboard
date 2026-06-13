@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+*.egg
+
+# Environment / secrets
+.env
+.env.*
+*.env
+
+# Logs
+logs/
+*.log
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+.npm/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# PM2
+.pm2/
+
+# Data / cache files
+backend/data/*.json
+backend/data/*.db
+status.json
+status_report.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

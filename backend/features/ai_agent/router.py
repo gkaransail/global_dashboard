@@ -6,11 +6,10 @@ Endpoints:
   POST /research  — deep agentic research with tool use
   POST /chat      — stateless multi-turn research chat
 """
-import os
-
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from core import llm
 from features.ai_agent.agent import (
     generate_chat_response,
     generate_research,
@@ -48,13 +47,16 @@ class ChatRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 _NO_KEY_RESPONSE = {
-    "error": "ANTHROPIC_API_KEY not configured",
-    "setup_instructions": "Set ANTHROPIC_API_KEY in backend/.env to enable AI features",
+    "error": "No AI provider configured",
+    "setup_instructions": (
+        "Add GROQ_API_KEY=gsk_... to backend/.env for free Groq access (groq.com), "
+        "or ANTHROPIC_API_KEY for Anthropic. Then restart: pm2 restart financeiq-backend"
+    ),
 }
 
 
 def _api_key_missing() -> bool:
-    return not bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return not llm.is_configured()
 
 
 # ---------------------------------------------------------------------------

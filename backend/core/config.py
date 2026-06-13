@@ -15,8 +15,19 @@ class Settings(BaseSettings):
     reversal_confidence_threshold: float = 0.55
     strong_signal_threshold: float = 0.75
 
-    # Anthropic (optional — enables AI Research Agent)
+    # AI provider: "groq" (free, default) or "anthropic" (paid)
+    # If not set, auto-detects from whichever API key is present
+    ai_provider: str = ""
+
+    # Groq (free tier — 14,400 req/day on Llama 3.3 70B)
+    groq_api_key: str = ""
+
+    # Anthropic (fallback / optional)
     anthropic_api_key: str = ""
+
+    # Supabase (persistent cache + chat history + scan results)
+    supabase_url: str = ""
+    supabase_key: str = ""   # use service role key, not anon
 
     class Config:
         env_file = ".env"

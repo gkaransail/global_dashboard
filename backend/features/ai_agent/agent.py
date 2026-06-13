@@ -1,36 +1,17 @@
 """
-AI Research Agent — core Claude integration.
-
-Uses the Anthropic Python SDK with tool use to gather real market data
-and synthesise it into research notes and chat responses.
+AI Research Agent — provider-agnostic (Groq free tier or Anthropic).
+Set GROQ_API_KEY in backend/.env to use Groq (free, default).
+Set ANTHROPIC_API_KEY to use Anthropic as fallback.
 """
 from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any
 
 import yfinance as yf
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Client
-# ---------------------------------------------------------------------------
-
-def get_client():
-    """Return an anthropic.Anthropic client or None if the key is missing."""
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        return None
-    try:
-        import anthropic  # lazy import so the module loads without the package
-        return anthropic.Anthropic(api_key=key)
-    except ImportError:
-        logger.error("anthropic package not installed — run: pip install anthropic>=0.40.0")
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +383,7 @@ def _get_news_sentiment(ticker: str, max_items: int = 10) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Agentic loop helpers
+# Agentic loop — delegates to core.llm (Groq or Anthropic)
 # ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT = """You are an expert financial analyst with deep knowledge of technical analysis, options markets, fundamental investing, and news-driven catalysts. You have access to real-time market data tools.
@@ -414,61 +395,10 @@ When analysing a stock:
 4. Review fundamentals for valuation context.
 5. Check insider activity as a confidence signal.
 6. Fetch recent news to identify catalysts, risks, or events driving the move.
-7. Analyze news sentiment with FinBERT to quantify whether news flow is bullish or bearish — and whether it confirms or contradicts the technical/options signals.
+7. Analyze news sentiment with FinBERT to quantify whether news flow is bullish or bearish.
 
-When news sentiment conflicts with technical signals (e.g., bullish chart but bearish news), flag this explicitly as a risk. When they align, treat it as signal confirmation.
-
-Synthesise all data into a clear, well-structured research note. Use specific numbers. Acknowledge uncertainty where it exists. Separate facts from interpretation. Do not give personalised financial advice."""
-
-
-def _run_agentic_loop(client, messages: list, system: str, max_tokens: int = 2048) -> str:
-    """
-    Execute the Claude tool-use agentic loop.
-    Returns the final text response.
-    """
-    import anthropic  # already imported by caller context
-
-    loop_messages = list(messages)  # shallow copy so we don't mutate caller's list
-    max_iterations = 10  # safety guard
-
-    for _ in range(max_iterations):
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=max_tokens,
-            system=system,
-            tools=TOOLS,
-            messages=loop_messages,
-        )
-
-        if response.stop_reason == "end_turn":
-            text = next(
-                (block.text for block in response.content if hasattr(block, "text")),
-                "",
-            )
-            return text
-
-        if response.stop_reason == "tool_use":
-            tool_results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    result_str = execute_tool(block.name, block.input)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result_str,
-                    })
-
-            loop_messages.append({"role": "assistant", "content": response.content})
-            loop_messages.append({"role": "user", "content": tool_results})
-        else:
-            # Unexpected stop reason — extract whatever text is available
-            text = next(
-                (block.text for block in response.content if hasattr(block, "text")),
-                "Analysis could not be completed.",
-            )
-            return text
-
-    return "Analysis reached maximum iterations without a final answer."
+When news sentiment conflicts with technical signals, flag this explicitly as a risk.
+Synthesise all data into a clear research note. Use specific numbers. Do not give personalised financial advice."""
 
 
 # ---------------------------------------------------------------------------
@@ -476,56 +406,29 @@ def _run_agentic_loop(client, messages: list, system: str, max_tokens: int = 204
 # ---------------------------------------------------------------------------
 
 def generate_summary(ticker: str) -> dict:
-    """
-    Quick one-shot summary of a ticker.
-    Gathers price, reversal, and fundamental data synchronously, then
-    asks Claude to synthesise a short paragraph summary.
-    """
-    client = get_client()
-    if not client:
-        return {"error": "ANTHROPIC_API_KEY not configured"}
+    """Quick one-shot summary — gathers data upfront, single LLM call."""
+    from core import llm
+    if not llm.is_configured():
+        return {"error": "No AI provider configured. Add GROQ_API_KEY to backend/.env"}
 
     ticker = ticker.upper()
-
-    # Gather data upfront (no tool loop needed for a summary — keeps latency low)
-    price_data = _safe_json(execute_tool("get_price_data", {"ticker": ticker}))
+    price_data    = _safe_json(execute_tool("get_price_data",       {"ticker": ticker}))
     reversal_data = _safe_json(execute_tool("get_reversal_analysis", {"ticker": ticker}))
-    fundamentals = _safe_json(execute_tool("get_fundamentals", {"ticker": ticker}))
+    fundamentals  = _safe_json(execute_tool("get_fundamentals",      {"ticker": ticker}))
 
-    context_block = (
+    context = (
         f"PRICE DATA:\n{json.dumps(price_data, indent=2)}\n\n"
         f"REVERSAL SIGNALS:\n{json.dumps(reversal_data, indent=2)}\n\n"
         f"FUNDAMENTALS:\n{json.dumps(fundamentals, indent=2)}"
     )
-
     system = (
         "You are a senior financial analyst. Write a concise, factual 2–4 paragraph "
-        "market summary. Cover: current price and trend, key technical signals, "
-        "valuation context. Use bullet points for key facts if helpful. Be specific "
-        "with numbers. Do not give personalised financial advice."
+        "market summary covering: current price and trend, key technical signals, "
+        "valuation context. Use bullet points for key facts. Be specific with numbers. "
+        "Do not give personalised financial advice."
     )
-
-    messages = [
-        {
-            "role": "user",
-            "content": (
-                f"Please write a quick market summary for {ticker}.\n\n"
-                f"Here is the current data:\n\n{context_block}"
-            ),
-        }
-    ]
-
     try:
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            system=system,
-            messages=messages,
-        )
-        text = next(
-            (block.text for block in response.content if hasattr(block, "text")),
-            "Summary unavailable.",
-        )
+        text = llm.complete(system, f"Write a quick market summary for {ticker}.\n\n{context}", max_tokens=1024)
         return {"summary": text, "ticker": ticker}
     except Exception as e:
         logger.exception("generate_summary failed for %s", ticker)
@@ -533,59 +436,46 @@ def generate_summary(ticker: str) -> dict:
 
 
 def generate_research(ticker: str, question: str) -> dict:
-    """
-    Deep research: runs the full agentic tool-use loop.
-    Claude decides which tools to call and synthesises a research note.
-    """
-    client = get_client()
-    if not client:
-        return {"error": "ANTHROPIC_API_KEY not configured"}
+    """Deep research: full agentic tool-use loop — LLM picks its own tools."""
+    from core import llm
+    if not llm.is_configured():
+        return {"error": "No AI provider configured. Add GROQ_API_KEY to backend/.env"}
 
     ticker = ticker.upper()
-    messages = [
-        {
-            "role": "user",
-            "content": (
-                f"Please conduct a thorough analysis of {ticker}.\n\n"
-                f"Research question: {question}\n\n"
-                "Use the available tools to gather current price data, technical signals, "
-                "options positioning, fundamentals, and insider activity. Then synthesise "
-                "your findings into a clear research note that directly answers the question."
-            ),
-        }
-    ]
-
+    messages = [{
+        "role": "user",
+        "content": (
+            f"Conduct a thorough analysis of {ticker}.\n\n"
+            f"Research question: {question}\n\n"
+            "Use the available tools to gather price data, technical signals, "
+            "options positioning, fundamentals, and insider activity. "
+            "Synthesise your findings into a research note that directly answers the question."
+        ),
+    }]
     try:
-        text = _run_agentic_loop(client, messages, _SYSTEM_PROMPT, max_tokens=2048)
+        text = llm.run_loop(messages, _SYSTEM_PROMPT, TOOLS, execute_tool, max_tokens=2048)
         return {"research": text, "ticker": ticker, "question": question}
     except Exception as e:
         logger.exception("generate_research failed for %s", ticker)
         return {"error": str(e), "ticker": ticker, "question": question}
 
 
-def generate_chat_response(
-    ticker: str,
-    messages: list[dict],  # [{"role": "user"|"assistant", "content": str}, ...]
-) -> dict:
-    """
-    Stateless chat: takes the full conversation history and returns the next message.
-    Tools are available so Claude can look up fresh data mid-conversation.
-    """
-    client = get_client()
-    if not client:
-        return {"error": "ANTHROPIC_API_KEY not configured"}
+def generate_chat_response(ticker: str, messages: list[dict]) -> dict:
+    """Stateless chat — full conversation history in, next message out."""
+    from core import llm
+    if not llm.is_configured():
+        return {"error": "No AI provider configured. Add GROQ_API_KEY to backend/.env"}
 
     ticker = ticker.upper()
     system = (
         f"{_SYSTEM_PROMPT}\n\n"
-        f"The user is currently researching {ticker}. "
-        "When they ask about 'the stock' or 'it', they mean {ticker}. "
-        "Use tools to fetch fresh data whenever the user asks about prices, signals, "
-        "or other quantitative information. Keep answers focused and conversational."
-    ).replace("{ticker}", ticker)
+        f"The user is researching {ticker}. When they say 'the stock' or 'it', they mean {ticker}. "
+        "Use tools to fetch fresh data when asked about prices, signals, or quantitative info."
+    )
 
     try:
-        text = _run_agentic_loop(client, messages, system, max_tokens=1024)
+        from core import llm
+        text = llm.run_loop(messages, system, TOOLS, execute_tool, max_tokens=1024)
         return {"content": text, "role": "assistant", "ticker": ticker}
     except Exception as e:
         logger.exception("generate_chat_response failed for %s", ticker)

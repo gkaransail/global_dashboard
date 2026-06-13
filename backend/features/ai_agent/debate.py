@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-from features.ai_agent.agent import execute_tool, get_client
+from features.ai_agent.agent import execute_tool
+from core import llm
 
 logger = logging.getLogger(__name__)
 
@@ -99,23 +99,13 @@ def _gather_data(ticker: str) -> str:
 
 # ── Single agent call (no tool loop — data already gathered) ─────────────────
 
-def _run_analyst(client, system: str, ticker: str, data_block: str, max_tokens: int = 1500) -> str:
+def _run_analyst(system: str, ticker: str, data_block: str, max_tokens: int = 1500) -> str:
     try:
-        import anthropic
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
+        return llm.complete(
+            system,
+            f"Analyze {ticker} using the following market data:\n\n{data_block}\n\nBuild your case using only the data above.",
             max_tokens=max_tokens,
-            system=system,
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Analyze {ticker} using the following market data:\n\n"
-                    f"{data_block}\n\n"
-                    f"Build your case using only the data above."
-                ),
-            }],
         )
-        return next((b.text for b in response.content if hasattr(b, "text")), "No response generated.")
     except Exception as e:
         return f"Agent failed: {e}"
 
@@ -143,27 +133,17 @@ def run_debate(ticker: str) -> dict:
     Run the full bull vs bear debate for a ticker.
     Returns both arguments, the judge's verdict, and a conviction score.
     """
-    client = get_client()
-    if not client:
-        return {"error": "ANTHROPIC_API_KEY not configured"}
+    if not llm.is_configured():
+        return {"error": "No AI provider configured. Add GROQ_API_KEY to backend/.env"}
 
     ticker = ticker.upper()
 
-    # Step 1: gather data once (shared by both agents)
-    data_block = _gather_data(ticker)
+    data_block    = _gather_data(ticker)
+    bull_argument = _run_analyst(_BULL_SYSTEM, ticker, data_block, max_tokens=1200)
+    bear_argument = _run_analyst(_BEAR_SYSTEM, ticker, data_block, max_tokens=1200)
 
-    # Step 2: run bull and bear in sequence
-    # (Could run concurrently with asyncio.gather, but sequential is simpler for now)
-    bull_argument = _run_analyst(client, _BULL_SYSTEM, ticker, data_block, max_tokens=1200)
-    bear_argument = _run_analyst(client, _BEAR_SYSTEM, ticker, data_block, max_tokens=1200)
-
-    # Step 3: judge synthesises both
-    judge_input = (
-        f"TICKER: {ticker}\n\n"
-        f"BULL ANALYST ARGUMENT:\n{bull_argument}\n\n"
-        f"BEAR ANALYST ARGUMENT:\n{bear_argument}"
-    )
-    judge_response = _run_analyst(client, _JUDGE_SYSTEM, ticker, judge_input, max_tokens=800)
+    judge_input    = f"TICKER: {ticker}\n\nBULL ANALYST ARGUMENT:\n{bull_argument}\n\nBEAR ANALYST ARGUMENT:\n{bear_argument}"
+    judge_response = _run_analyst(_JUDGE_SYSTEM, ticker, judge_input, max_tokens=800)
 
     conviction = _parse_conviction(judge_response)
     verdict    = _parse_verdict(judge_response)

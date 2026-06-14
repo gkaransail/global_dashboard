@@ -46,7 +46,7 @@ export default function AISummary() {
     setSummary(null)
     try {
       const data = await api.post('/ai_agent/summary', { ticker })
-      if (data.error === 'ANTHROPIC_API_KEY not configured') {
+      if (data.error && data.error.includes('No AI provider')) {
         setNoApiKey(true)
       } else if (data.error) {
         setError(data.error)
@@ -76,7 +76,7 @@ export default function AISummary() {
         <div>
           <h2 className="ai-section-title">🤖 AI Summary — {ticker}</h2>
           <p className="ai-section-sub">
-            Quick AI-generated market overview powered by Claude
+            Quick AI-generated market overview powered by Groq · Llama 3.3 70B
           </p>
         </div>
         <button
@@ -126,7 +126,7 @@ export default function AISummary() {
             <pre className="ai-summary-text">{summary}</pre>
           </div>
           <div className="ai-result-footer">
-            <span>Powered by Claude · Not financial advice · Data via yfinance</span>
+            <span>Powered by Groq · Llama 3.3 70B · Not financial advice · Data via yfinance</span>
           </div>
         </div>
       )}

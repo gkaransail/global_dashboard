@@ -70,7 +70,7 @@ export default function DeepResearch() {
     setResult(null)
     try {
       const data = await api.post('/ai_agent/research', { ticker, question: q })
-      if (data.error === 'ANTHROPIC_API_KEY not configured') {
+      if (data.error && data.error.includes('No AI provider')) {
         setNoApiKey(true)
       } else if (data.error) {
         setError(data.error)
@@ -105,7 +105,7 @@ export default function DeepResearch() {
         <div>
           <h2 className="ai-section-title">🔬 Deep Research — {ticker}</h2>
           <p className="ai-section-sub">
-            Claude uses real-time tools to research your question in depth
+            Groq AI uses real-time tools to research your question in depth
           </p>
         </div>
       </div>
@@ -166,7 +166,7 @@ export default function DeepResearch() {
             ))}
           </div>
           <div className="ai-loading-sub">
-            Claude is calling market data tools and synthesizing findings…
+            Groq is calling market data tools and synthesizing findings…
           </div>
         </div>
       )}
@@ -197,7 +197,7 @@ export default function DeepResearch() {
             dangerouslySetInnerHTML={{ __html: markdownToHtml(result.research) }}
           />
           <div className="ai-result-footer">
-            Powered by Claude with real-time market data · Not financial advice
+            Powered by Groq · Llama 3.3 70B · Real-time market data · Not financial advice
           </div>
         </div>
       )}

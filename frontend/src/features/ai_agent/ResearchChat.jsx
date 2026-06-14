@@ -15,7 +15,7 @@ function ThinkingBubble() {
           <span /><span /><span />
         </span>
       </div>
-      <div className="chat-meta">Claude · thinking…</div>
+      <div className="chat-meta">Groq · thinking…</div>
     </div>
   )
 }
@@ -28,7 +28,7 @@ function MessageBubble({ msg }) {
         <pre className="chat-text">{msg.content}</pre>
       </div>
       <div className="chat-meta">
-        {isUser ? 'You' : 'Claude'} · {formatTime(msg.timestamp)}
+        {isUser ? 'You' : 'Groq'} · {formatTime(msg.timestamp)}
       </div>
     </div>
   )
@@ -62,7 +62,7 @@ export default function ResearchChat() {
           ticker,
           messages: [{ role: 'user', content: '__ping__' }],
         })
-        if (data.error === 'ANTHROPIC_API_KEY not configured') {
+        if (data.error && data.error.includes('No AI provider')) {
           setNoApiKey(true)
         }
       } catch {
@@ -96,7 +96,7 @@ export default function ResearchChat() {
       const history = updatedMessages.map(m => ({ role: m.role, content: m.content }))
       const data = await api.post('/ai_agent/chat', { ticker, messages: history })
 
-      if (data.error === 'ANTHROPIC_API_KEY not configured') {
+      if (data.error && data.error.includes('No AI provider')) {
         setNoApiKey(true)
         return
       }
@@ -148,7 +148,7 @@ export default function ResearchChat() {
       {/* Context banner */}
       <div className="chat-context-bar">
         <span>🤖 Research assistant for <strong>{ticker}</strong></span>
-        <span className="chat-context-powered">Powered by Claude</span>
+        <span className="chat-context-powered">Powered by Groq · Llama 3.3 70B</span>
         {messages.length > 0 && (
           <button
             className="btn-ghost chat-clear-btn"

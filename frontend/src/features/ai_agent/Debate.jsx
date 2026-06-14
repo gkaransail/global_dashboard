@@ -67,7 +67,7 @@ export default function Debate() {
     setNoApiKey(false)
     try {
       const data = await api.post('/ai_agent/debate', { ticker })
-      if (data.error === 'ANTHROPIC_API_KEY not configured') {
+      if (data.error && data.error.includes('No AI provider')) {
         setNoApiKey(true)
       } else if (data.error) {
         setError(data.error)
@@ -151,7 +151,7 @@ export default function Debate() {
           </div>
 
           <div style={{ marginTop: 12, fontSize: 11, color: '#475569', textAlign: 'center' }}>
-            Powered by Claude · Not financial advice · Data via yfinance
+            Powered by Groq · Llama 3.3 70B · Not financial advice · Data via yfinance
           </div>
         </>
       )}
@@ -160,7 +160,7 @@ export default function Debate() {
         <div style={{ textAlign: 'center', padding: '60px 20px', color: '#475569' }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>⚔</div>
           <div style={{ fontSize: 15, marginBottom: 6 }}>Bull vs Bear debate for {ticker}</div>
-          <div style={{ fontSize: 13 }}>Press "Start Debate" — three Claude agents will argue, rebut, and score conviction.</div>
+          <div style={{ fontSize: 13 }}>Press "Start Debate" — three Groq AI agents will argue, rebut, and score conviction.</div>
         </div>
       )}
     </div>

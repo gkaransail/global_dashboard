@@ -1,3 +1,7 @@
-feature_id = "health"
-feature_name = "Health Check"
-feature_description = "Simple health check endpoint"
+MANIFEST = {
+    "id": "health",
+    "label": "Health Check",
+    "description": "Simple health check endpoint",
+    "status": "live",
+    "api_prefix": "/api/v1/health",
+}

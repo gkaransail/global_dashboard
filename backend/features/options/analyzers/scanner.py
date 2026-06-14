@@ -39,7 +39,7 @@ UNIVERSE = [
 ]
 # Deduplicate while preserving order (AMZN appears in both tech and consumer)
 _seen = set()
-UNIVERSE = [t for t in UNIVERSE if not (_seen.add(t) or t in _seen)]
+UNIVERSE = [t for t in UNIVERSE if t not in _seen and not _seen.add(t)]
 
 
 def _score_ticker(ticker: str, timeframe: str) -> dict | None:

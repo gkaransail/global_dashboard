@@ -73,7 +73,7 @@ function SumCard({ label, value, color }) {
 function SkeletonRow() {
   return (
     <tr>
-      {Array.from({ length: 8 }).map((_, i) => (
+      {Array.from({ length: 10 }).map((_, i) => (
         <td key={i} style={{ padding: '12px 10px' }}>
           <div style={{
             height: '14px',
@@ -247,7 +247,9 @@ export default function TransactionFeed() {
                   { key: null,    label: 'Title' },
                   { key: null,    label: 'Type' },
                   { key: 'shares', label: 'Shares' },
-                  { key: null,    label: 'Price' },
+                  { key: null,    label: 'Price Paid' },
+                  { key: null,    label: 'Current Price' },
+                  { key: null,    label: 'P&L %' },
                   { key: 'value', label: 'Value' },
                   { key: null,    label: 'Ownership' },
                 ].map(col => (
@@ -280,7 +282,7 @@ export default function TransactionFeed() {
 
               {!loading && !error && !hasData && (
                 <tr>
-                  <td colSpan={8} style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--muted)' }}>
+                  <td colSpan={10} style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--muted)' }}>
                     <div style={{ fontSize: '28px', marginBottom: '10px' }}>📋</div>
                     <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: '6px', color: 'var(--text-dim)' }}>
                       No insider transactions found for {ticker} in the last 6 months
@@ -330,6 +332,18 @@ export default function TransactionFeed() {
                   </td>
                   <td style={{ padding: '11px 12px', color: 'var(--text-dim)', textAlign: 'right', whiteSpace: 'nowrap' }}>
                     {tx.price ? `$${tx.price.toFixed(2)}` : '—'}
+                  </td>
+                  <td style={{ padding: '11px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {tx.current_price != null
+                      ? <span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>${tx.current_price.toLocaleString()}</span>
+                      : <span style={{ color: 'var(--muted)' }}>—</span>}
+                  </td>
+                  <td style={{ padding: '11px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {tx.pnl_pct != null
+                      ? <span style={{ fontWeight: 700, color: tx.pnl_pct >= 0 ? 'var(--bull)' : 'var(--bear)' }}>
+                          {tx.pnl_pct >= 0 ? '+' : ''}{tx.pnl_pct.toFixed(1)}%
+                        </span>
+                      : <span style={{ color: 'var(--muted)' }}>—</span>}
                   </td>
                   <td style={{ padding: '11px 12px', color: 'var(--text)', fontWeight: 600, textAlign: 'right', whiteSpace: 'nowrap' }}>
                     {formatValue(tx.value)}

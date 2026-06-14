@@ -101,8 +101,20 @@ def get_holders(ticker: str) -> dict:
     avg_change = sum(all_changes) / len(all_changes) if all_changes else 0.0
     net_flow = "accumulating" if avg_change > 1.0 else "distributing" if avg_change < -1.0 else "neutral"
 
+    # Current price + value at last 13F report
+    current_price = None
+    try:
+        current_price = round(float(t.fast_info.last_price), 2)
+    except Exception:
+        pass
+    for h in holders:
+        h["current_price"] = current_price
+        if current_price and h["shares"]:
+            h["current_value"] = round(current_price * h["shares"])
+
     result = {
         "ticker": ticker,
+        "current_price": current_price,
         "ownership": {
             "institutional_pct": round(inst_pct * 100, 1),
             "insider_pct": round(insider_pct * 100, 1),

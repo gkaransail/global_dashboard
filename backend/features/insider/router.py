@@ -1,3 +1,4 @@
+import yfinance as yf
 from fastapi import APIRouter, HTTPException, Query
 
 from features.insider import fetcher
@@ -28,10 +29,23 @@ async def transaction_feed(
 
     try:
         transactions = fetcher.fetch_transactions(sym, days=days)
+        # Enrich with current price for P&L comparison
+        current_price = None
+        try:
+            current_price = round(float(yf.Ticker(sym).fast_info.last_price), 2)
+        except Exception:
+            pass
+        for tx in transactions:
+            tx["current_price"] = current_price
+            if tx.get("price") and current_price:
+                tx["pnl_pct"] = round((current_price - tx["price"]) / tx["price"] * 100, 2)
+            else:
+                tx["pnl_pct"] = None
         result = {
             "ticker": sym,
             "days": days,
             "count": len(transactions),
+            "current_price": current_price,
             "transactions": transactions,
         }
         _cache.set(cache_key, result)

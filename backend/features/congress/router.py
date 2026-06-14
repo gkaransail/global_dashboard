@@ -10,6 +10,7 @@ Endpoints:
 import logging
 from datetime import datetime, timedelta
 
+import yfinance as yf
 from fastapi import APIRouter, HTTPException, Query
 
 from features.congress import fetcher
@@ -19,6 +20,25 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 CACHE_TTL = 3600  # 1 hour
+
+
+def _batch_current_prices(tickers: list[str]) -> dict[str, float | None]:
+    """Fetch current prices for a list of tickers via yfinance. Cached 5 min."""
+    unique = sorted({t for t in tickers if t})
+    if not unique:
+        return {}
+    cache_key = f"congress:prices:{','.join(unique[:30])}"
+    cached = _cache.get(cache_key, 300)
+    if cached:
+        return cached
+    prices: dict[str, float | None] = {}
+    for ticker in unique:
+        try:
+            prices[ticker] = round(float(yf.Ticker(ticker).fast_info.last_price), 2)
+        except Exception:
+            prices[ticker] = None
+    _cache.set(cache_key, prices)
+    return prices
 
 
 def _cutoff_date(days: int) -> str:
@@ -72,6 +92,12 @@ async def trade_feed(
     filtered = _filter_trades(all_trades, days, ticker, chamber, transaction_type)
     total = len(filtered)
     page = filtered[:limit]
+
+    # Enrich with live current prices
+    unique_tickers = [t["ticker"] for t in page if t.get("ticker")]
+    prices = _batch_current_prices(unique_tickers)
+    for trade in page:
+        trade["current_price"] = prices.get(trade.get("ticker"))
 
     result = {
         "days": days,

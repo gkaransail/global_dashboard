@@ -1,15 +1,28 @@
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useState } from 'react'
-import { FEATURES } from '../features'
+import { FEATURES, SECTION_LABELS } from '../features'
 
-// Persists collapse state across route changes
 let _globalCollapsed = false
+
+// Build ordered section list preserving feature order
+function getSections(features) {
+  const order = []
+  const map = {}
+  for (const f of features) {
+    const s = f.section || 'other'
+    if (!map[s]) { map[s] = []; order.push(s) }
+    map[s].push(f)
+  }
+  return order.map(s => ({ key: s, label: SECTION_LABELS[s] || s, features: map[s] }))
+}
+
+const SECTIONS = getSections(FEATURES)
 
 export default function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
   const activeFeature = FEATURES.find(f => location.pathname.startsWith(`/${f.id}`))
-  const [expanded, setExpanded] = useState(activeFeature?.id ?? 'reversal')
+  const [expanded, setExpanded] = useState(activeFeature?.id ?? null)
   const [collapsed, setCollapsed] = useState(_globalCollapsed)
 
   function toggleCollapse() {
@@ -22,13 +35,8 @@ export default function Sidebar() {
       setCollapsed(false)
       _globalCollapsed = false
     }
-    if (feature.status === 'coming_soon' || !feature.subOptions?.length) {
-      setExpanded(expanded === feature.id ? null : feature.id)
-      navigate(`/${feature.id}`)
-      return
-    }
     setExpanded(feature.id)
-    navigate(feature.subOptions[0].path)
+    navigate(feature.subOptions?.[0]?.path ?? `/${feature.id}`)
   }
 
   function handleSubClick(sub) {
@@ -39,6 +47,7 @@ export default function Sidebar() {
 
   return (
     <aside className="sidebar" style={{ width: w, minWidth: w, transition: 'width 0.2s ease, min-width 0.2s ease' }}>
+
       {/* Logo */}
       <div className="sidebar-logo" style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}>
         <div className="sidebar-logo-mark" style={{ flexShrink: 0 }}>
@@ -58,75 +67,90 @@ export default function Sidebar() {
         )}
       </div>
 
-      {/* Home link */}
+      {/* Dashboard home link */}
       <div style={{ padding: collapsed ? '8px 8px 4px' : '8px 10px 4px' }}>
         <button
           onClick={() => navigate('/')}
-          title={collapsed ? 'Market Intelligence Hub' : undefined}
+          title={collapsed ? 'Dashboard' : undefined}
           style={{
             width: '100%', display: 'flex', alignItems: 'center',
             gap: collapsed ? 0 : 8, justifyContent: collapsed ? 'center' : 'flex-start',
             padding: '8px 10px', borderRadius: 8, border: 'none', cursor: 'pointer',
-            background: location.pathname === '/' ? 'rgba(59,130,246,0.15)' : 'transparent',
+            background: location.pathname === '/' ? 'rgba(99,102,241,0.15)' : 'transparent',
             color: location.pathname === '/' ? 'var(--accent-hi)' : 'var(--text-dim)',
             fontSize: 13, fontWeight: location.pathname === '/' ? 700 : 400,
           }}
         >
-          <span style={{ fontSize: 16 }}>🎯</span>
-          {!collapsed && <span>Market Intelligence</span>}
+          <span style={{ fontSize: 16 }}>🏠</span>
+          {!collapsed && <span>Dashboard</span>}
         </button>
       </div>
 
-      {/* Feature nav */}
+      {/* Divider */}
+      {!collapsed && <div style={{ height: 1, background: 'var(--border)', margin: '0 12px 4px' }} />}
+
+      {/* Feature nav — grouped by section */}
       <div className="sidebar-section" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-        {!collapsed && <div className="sidebar-section-label">Modules</div>}
-        {FEATURES.map(feature => {
-          const isExpanded = expanded === feature.id && !collapsed
-          const isActive = activeFeature?.id === feature.id
+        {SECTIONS.map(({ key, label, features }) => (
+          <div key={key}>
+            {/* Section header */}
+            {!collapsed && (
+              <div style={{
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
+                color: 'var(--muted)', padding: '10px 14px 4px',
+                textTransform: 'uppercase',
+              }}>
+                {label}
+              </div>
+            )}
+            {collapsed && <div style={{ height: 6 }} />}
 
-          return (
-            <div key={feature.id} className="sidebar-feature">
-              <button
-                className={`sidebar-feature-btn ${isActive ? 'active' : ''}`}
-                onClick={() => handleFeatureClick(feature)}
-                title={collapsed ? feature.label : undefined}
-                style={{ justifyContent: collapsed ? 'center' : 'flex-start', paddingLeft: collapsed ? 0 : undefined }}
-              >
-                <span className="sidebar-feature-icon" style={{ fontSize: 16 }}>{feature.icon}</span>
-                {!collapsed && (
-                  <>
-                    <span className="sidebar-feature-label">{feature.label}</span>
-                    {feature.status === 'coming_soon' && (
-                      <span className="sidebar-coming-soon">Soon</span>
+            {features.map(feature => {
+              const isExpanded = expanded === feature.id && !collapsed
+              const isActive = activeFeature?.id === feature.id
+
+              return (
+                <div key={feature.id} className="sidebar-feature">
+                  <button
+                    className={`sidebar-feature-btn ${isActive ? 'active' : ''}`}
+                    onClick={() => handleFeatureClick(feature)}
+                    title={collapsed ? feature.label : undefined}
+                    style={{ justifyContent: collapsed ? 'center' : 'flex-start', paddingLeft: collapsed ? 0 : undefined }}
+                  >
+                    <span className="sidebar-feature-icon" style={{ fontSize: 15 }}>{feature.icon}</span>
+                    {!collapsed && (
+                      <>
+                        <span className="sidebar-feature-label">{feature.label}</span>
+                        <span className={`sidebar-feature-arrow ${isExpanded ? 'open' : ''}`}>›</span>
+                      </>
                     )}
-                    <span className={`sidebar-feature-arrow ${isExpanded ? 'open' : ''}`}>›</span>
-                  </>
-                )}
-              </button>
+                  </button>
 
-              {isExpanded && feature.subOptions?.length > 0 && (
-                <div className="sidebar-sub-options">
-                  {feature.subOptions.map(sub => {
-                    const isSubActive = location.pathname === sub.path
-                    return (
-                      <button
-                        key={sub.id}
-                        className={`sidebar-sub-btn ${isSubActive ? 'active' : ''}`}
-                        onClick={() => handleSubClick(sub)}
-                      >
-                        <span>{sub.icon}</span>
-                        <span>{sub.label}</span>
-                      </button>
-                    )
-                  })}
+                  {isExpanded && feature.subOptions?.length > 0 && (
+                    <div className="sidebar-sub-options">
+                      {feature.subOptions.map(sub => {
+                        const isSubActive = location.pathname === sub.path
+                        return (
+                          <button
+                            key={sub.id}
+                            className={`sidebar-sub-btn ${isSubActive ? 'active' : ''}`}
+                            onClick={() => handleSubClick(sub)}
+                          >
+                            <span>{sub.icon}</span>
+                            <span>{sub.label}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          )
-        })}
+              )
+            })}
+          </div>
+        ))}
       </div>
 
-      {/* Footer: collapse toggle + status */}
+      {/* Footer */}
       <div className="sidebar-footer" style={{ flexDirection: 'column', gap: 8, padding: '12px 10px' }}>
         <button
           onClick={toggleCollapse}

@@ -1,10 +1,12 @@
 import { Routes, Route, Navigate, NavLink } from 'react-router-dom'
 import RankedPicks from './RankedPicks'
 import MarketOverview from './MarketOverview'
+import SmartMoneyScanner from '../smart_money/SmartMoneyScanner'
 
 const TABS = [
-  { path: 'scan',   label: '🎯 Ranked Picks' },
-  { path: 'market', label: '🌐 Market Overview' },
+  { path: 'scan',        label: '🎯 Ranked Picks' },
+  { path: 'smart_money', label: '💰 Smart Money' },
+  { path: 'market',      label: '🌐 Market Overview' },
 ]
 
 export default function MarketIntelFeature() {
@@ -20,8 +22,9 @@ export default function MarketIntelFeature() {
       <div className="sub-content">
         <Routes>
           <Route index element={<Navigate to="scan" replace />} />
-          <Route path="scan"   element={<RankedPicks />} />
-          <Route path="market" element={<MarketOverview />} />
+          <Route path="scan"        element={<RankedPicks />} />
+          <Route path="smart_money" element={<SmartMoneyScanner />} />
+          <Route path="market"      element={<MarketOverview />} />
         </Routes>
       </div>
     </div>

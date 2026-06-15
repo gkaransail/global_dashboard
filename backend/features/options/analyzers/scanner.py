@@ -50,10 +50,19 @@ def _score_ticker(ticker: str, timeframe: str) -> dict | None:
         logger.debug(f"Scanner: {ticker} failed: {e}")
         return None
 
-    pc    = data.get('pc_ratio')
     spot  = data.get('spot_price')
-    if not pc or not spot:
+    if not spot:
         return None
+
+    # Signal priority: ATM P/C (near-money, strips far-OTM hedges) > Volume P/C > OI P/C
+    pc_atm = data.get('pc_atm_ratio')
+    pc_vol = data.get('pc_vol_ratio')
+    pc_oi  = data.get('pc_ratio')
+    pc     = pc_atm if pc_atm is not None else (pc_vol if pc_vol is not None else pc_oi)
+    if pc is None:
+        return None
+
+    pc_label = 'ATM P/C' if pc_atm is not None else ('Vol P/C' if pc_vol is not None else 'P/C OI')
 
     iv_rank  = data.get('iv_rank')
     max_pain = data.get('max_pain')
@@ -63,25 +72,26 @@ def _score_ticker(ticker: str, timeframe: str) -> dict | None:
     score   = 0
     signals = []
 
-    # ── P/C OI ratio — primary signal (±3) ───────────────────────────────
+    # ── ATM P/C — primary signal (±3) ────────────────────────────────────
+    # Uses near-money strikes only — immune to far-OTM portfolio hedges
     if pc < 0.6:
         score += 3
-        signals.append(f'Strong call dominance (P/C {pc:.2f})')
+        signals.append(f'Strong call dominance ({pc_label} {pc:.2f})')
     elif pc < 0.8:
         score += 2
-        signals.append(f'Call-heavy positioning (P/C {pc:.2f})')
+        signals.append(f'Call-heavy near-money ({pc_label} {pc:.2f})')
     elif pc < 1.0:
         score += 1
-        signals.append(f'Mild bullish bias (P/C {pc:.2f})')
+        signals.append(f'Mild bullish bias ({pc_label} {pc:.2f})')
     elif pc < 1.2:
         score -= 1
-        signals.append(f'Mild bearish bias (P/C {pc:.2f})')
+        signals.append(f'Mild bearish bias ({pc_label} {pc:.2f})')
     elif pc < 1.5:
         score -= 2
-        signals.append(f'Put-heavy positioning (P/C {pc:.2f})')
+        signals.append(f'Put-heavy near-money ({pc_label} {pc:.2f})')
     else:
         score -= 3
-        signals.append(f'Strong put dominance (P/C {pc:.2f})')
+        signals.append(f'Strong put dominance ({pc_label} {pc:.2f})')
 
     # ── Max pain direction (±1) ───────────────────────────────────────────
     if max_pain and spot:
@@ -109,13 +119,19 @@ def _score_ticker(ticker: str, timeframe: str) -> dict | None:
         'score':            score,
         'direction':        'bullish' if score > 0 else 'bearish' if score < 0 else 'neutral',
         'spot_price':       round(spot, 2),
-        'pc_ratio':         round(pc, 2),
+        'pc_ratio':         round(pc_oi, 2) if pc_oi is not None else None,
+        'pc_vol_ratio':     round(pc_vol, 2) if pc_vol is not None else None,
+        'pc_atm_ratio':     round(pc_atm, 2) if pc_atm is not None else None,
+        'pc_primary':       round(pc, 2),
+        'pc_primary_label': pc_label,
         'atm_iv_pct':       atm_iv,
         'iv_rank':          iv_rank,
         'expected_move':    em,
         'max_pain':         max_pain,
         'signals':          signals,
         'expiration_label': data.get('selected_expiration', {}).get('label'),
+        'expiration_dte':   data.get('selected_expiration', {}).get('dte'),
+        'timeframe':        timeframe,
     }
 
 

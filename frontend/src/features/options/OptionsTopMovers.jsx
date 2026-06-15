@@ -58,15 +58,21 @@ function Chip({ label, val, color }) {
 
 function StockRow({ rank, stock, isBull, onClick }) {
   const {
-    ticker, score, spot_price, pc_ratio, atm_iv_pct,
-    iv_rank, expected_move, signals, expiration_label,
+    ticker, score, spot_price, pc_atm_ratio, pc_vol_ratio, pc_ratio,
+    pc_primary, pc_primary_label, atm_iv_pct,
+    iv_rank, expected_move, signals, expiration_label, expiration_dte,
   } = stock
 
   const hoverBorder = isBull ? 'rgba(34,197,94,0.5)' : 'rgba(239,68,68,0.5)'
   const hoverBg     = isBull ? 'rgba(34,197,94,0.03)' : 'rgba(239,68,68,0.03)'
 
-  const pcColor = pc_ratio < 0.8 ? 'var(--bull)' : pc_ratio > 1.2 ? 'var(--bear)' : 'var(--text)'
+  // Color the primary P/C chip — green = bullish, red = bearish
+  const primaryPC = pc_atm_ratio ?? pc_vol_ratio ?? pc_ratio
+  const pcColor = primaryPC < 0.8 ? 'var(--bull)' : primaryPC > 1.2 ? 'var(--bear)' : 'var(--text)'
   const ivrColor = iv_rank > 70 ? 'var(--bear)' : iv_rank < 25 ? 'var(--bull)' : 'var(--text)'
+
+  // Show overall P/C in muted tooltip when it conflicts with ATM
+  const hasHedging = pc_atm_ratio != null && pc_ratio != null && ((pc_atm_ratio > 1.0) !== (pc_ratio > 1.0))
 
   return (
     <div
@@ -106,11 +112,21 @@ function StockRow({ rank, stock, isBull, onClick }) {
 
       {/* Stats chips */}
       <div style={{ display: 'flex', gap: 14, flex: 1, flexWrap: 'wrap' }}>
-        <Chip label="P/C"     val={pc_ratio?.toFixed(2)}                              color={pcColor} />
+        <div
+          title={hasHedging ? `Overall P/C OI is ${pc_ratio?.toFixed(2)} — higher because of far-OTM portfolio hedges. ATM is the cleaner directional signal.` : undefined}
+          style={{ cursor: hasHedging ? 'help' : 'default' }}
+        >
+          <Chip
+            label={pc_primary_label ?? 'P/C ATM'}
+            val={primaryPC?.toFixed(2)}
+            color={pcColor}
+          />
+          {hasHedging && <div style={{ fontSize: 8, color: 'var(--gold)', marginTop: 1 }}>⚡ hedged</div>}
+        </div>
         <Chip label="ATM IV"  val={atm_iv_pct != null ? `${atm_iv_pct}%` : null} />
         <Chip label="IV Rank" val={iv_rank    != null ? Math.round(iv_rank) : null}   color={ivrColor} />
         <Chip label="±Move"   val={expected_move ? `±${expected_move.move_pct}%` : null} color="var(--accent)" />
-        <Chip label="Expiry"  val={expiration_label} />
+        <Chip label="Expiry"  val={expiration_label ? `${expiration_label}${expiration_dte != null ? ` (${expiration_dte}d)` : ''}` : null} />
       </div>
 
       <span style={{ color: 'var(--muted)', fontSize: 12, flexShrink: 0 }}>→</span>
@@ -188,7 +204,7 @@ export default function OptionsTopMovers() {
         <div className="section-title">Options Flow Scanner — Top 20 Bullish &amp; Bearish</div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
           Scans {data ? `${data.scanned} of ${data.universe_size}` : '80+'} liquid stocks across sectors.
-          Ranked by P/C ratio, max pain &amp; IV rank. Click any row to open its full options chain.
+          Ranked by near-money ATM P/C ratio (strips out far-OTM portfolio hedges), max pain direction &amp; IV rank. Click any row to open its full options chain.
         </div>
       </div>
 
@@ -272,12 +288,13 @@ export default function OptionsTopMovers() {
           {/* ── Legend ─────────────────────────────────────────────── */}
           <div style={{ display: 'flex', gap: 20, fontSize: 11, color: 'var(--muted)', flexWrap: 'wrap', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
             <span><strong style={{ color: 'var(--text)' }}>Score</strong> −5 to +5</span>
-            <span><strong style={{ color: 'var(--text)' }}>P/C</strong> Put/Call OI ratio</span>
+            <span><strong style={{ color: 'var(--text)' }}>P/C ATM</strong> Near-money put/call ratio (±10% of spot) — strips out far-OTM portfolio hedges</span>
             <span><strong style={{ color: 'var(--text)' }}>ATM IV</strong> At-the-money implied vol</span>
             <span><strong style={{ color: 'var(--text)' }}>IV Rank</strong> Current IV vs 52-week range (0–100)</span>
             <span><strong style={{ color: 'var(--text)' }}>±Move</strong> 1SD expected move to expiry</span>
-            <span style={{ color: 'var(--bull)' }}>■ Green P/C = call-heavy</span>
-            <span style={{ color: 'var(--bear)' }}>■ Red P/C = put-heavy</span>
+            <span style={{ color: 'var(--bull)' }}>■ Green = call-heavy (bullish)</span>
+            <span style={{ color: 'var(--bear)' }}>■ Red = put-heavy (bearish)</span>
+            <span style={{ color: 'var(--gold)' }}>⚡ hedged = ATM bullish but far-OTM puts inflating overall ratio</span>
           </div>
 
           {/* ── Scoring explainer ──────────────────────────────────── */}
@@ -286,8 +303,8 @@ export default function OptionsTopMovers() {
             <div className="ov-glossary-grid">
               {[
                 {
-                  term: 'P/C OI Ratio  ±3 points',
-                  def:  'Primary signal. P/C < 0.6 = heavy call buying (+3, strongly bullish). P/C 0.6–0.8 = call-heavy (+2). P/C 0.8–1.0 = mild bullish (+1). Reversed for bearish. Tells you where institutional money is positioned.',
+                  term: 'ATM P/C Ratio  ±3 points',
+                  def:  'Primary signal. Uses only strikes within ±10% of spot — strips out far-OTM puts bought as cheap portfolio insurance by institutions. ATM P/C < 0.6 = heavy call buying near the money (+3). 0.6–0.8 = call-heavy (+2). 0.8–1.0 = mild bullish (+1). Reversed for bearish. If overall P/C looks bearish but ATM is bullish, the stock is marked ⚡ hedged.',
                 },
                 {
                   term: 'Max Pain Direction  ±1 point',

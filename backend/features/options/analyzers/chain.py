@@ -11,7 +11,7 @@ import yfinance as yf
 from core import cache as _cache
 
 logger = logging.getLogger(__name__)
-CACHE_TTL = 120  # 2 min — options data changes intraday
+CACHE_TTL = 300  # 5 min — reduces Yahoo Finance rate-limit hits
 RISK_FREE_RATE = 0.045  # 4.5% — approximate 3-month T-bill
 
 
@@ -169,12 +169,26 @@ def get_chain(ticker: str, expiration: str, strike_range: float = 0.25) -> dict:
     if cached:
         return cached
 
-    t   = yf.Ticker(ticker.upper())
+    t = yf.Ticker(ticker.upper())
+
+    # Validate expiration before calling option_chain
+    try:
+        available = t.options or ()
+    except Exception:
+        available = ()
+    if not available:
+        raise ValueError(f'No options data found for "{ticker.upper()}". Verify the ticker symbol.')
+    if expiration not in available:
+        raise ValueError(
+            f'Expiration "{expiration}" not found for {ticker.upper()}. '
+            f'Available: {", ".join(available[:6])}{"…" if len(available) > 6 else ""}'
+        )
+
     raw = t.option_chain(expiration)
     spot_df = t.history(period="1d", auto_adjust=True)
     S   = float(spot_df["Close"].iloc[-1]) if not spot_df.empty else None
     if S is None:
-        return {"error": "Could not fetch spot price"}
+        raise ValueError(f'Could not fetch spot price for "{ticker.upper()}". The ticker may be delisted or invalid.')
 
     dte = _dte(expiration)
     T   = max(dte / 365.0, 1 / 365.0)

@@ -12,7 +12,7 @@ import yfinance as yf
 from core import cache as _cache
 
 logger = logging.getLogger(__name__)
-CACHE_TTL = 180
+CACHE_TTL = 600  # 10 min — reduces Yahoo Finance rate-limit hits
 
 
 def timeframe_to_days(timeframe: str) -> int:
@@ -33,8 +33,17 @@ def timeframe_to_days(timeframe: str) -> int:
 
 def _get_spot(ticker: str) -> float:
     t = yf.Ticker(ticker)
-    info = t.fast_info
-    return float(info.last_price)
+    # fast_info is the lightest call; fall back to recent history if it's rate-limited
+    try:
+        price = t.fast_info.last_price
+        if price and not (isinstance(price, float) and math.isnan(price)):
+            return float(price)
+    except Exception:
+        pass
+    hist = t.history(period="5d", interval="1d", auto_adjust=True)
+    if not hist.empty:
+        return float(hist["Close"].iloc[-1])
+    raise RuntimeError(f"Cannot fetch spot price for {ticker} — Yahoo Finance may be rate-limiting. Try again in a moment.")
 
 
 def _get_expirations(ticker: str) -> list[dict]:
@@ -86,34 +95,34 @@ def calc_expected_move(spot: float, atm_iv: float, dte: int) -> dict:
     }
 
 
-def calc_max_pain(chain_data: dict) -> Optional[float]:
+def calc_max_pain(chain_data: dict, spot: float) -> Optional[float]:
     """
-    Max pain: strike where total option holder losses are maximized
-    (i.e., where market makers pay least).
-    For each strike, compute total intrinsic value of all calls + puts at that price.
-    Max pain = strike with minimum total payout.
+    Max pain: strike where total option holder losses are maximized.
+    Filtered to ±40% of spot to exclude LEAPS / deep-OTM contracts that
+    distort the calculation when spot is far from historical strike ranges.
     """
     calls = chain_data.get("calls", [])
-    puts = chain_data.get("puts", [])
+    puts  = chain_data.get("puts", [])
     if not calls or not puts:
         return None
 
-    call_map = {c["strike"]: c.get("oi", 0) or 0 for c in calls}
-    put_map  = {p["strike"]: p.get("oi", 0) or 0 for p in puts}
+    lo, hi = spot * 0.60, spot * 1.40
+    call_map = {c["strike"]: c.get("oi", 0) or 0 for c in calls if lo <= c["strike"] <= hi}
+    put_map  = {p["strike"]: p.get("oi", 0) or 0 for p in puts  if lo <= p["strike"] <= hi}
     all_strikes = sorted(set(list(call_map.keys()) + list(put_map.keys())))
+
+    if not all_strikes:
+        # No strikes in range — fall back to unfiltered
+        call_map = {c["strike"]: c.get("oi", 0) or 0 for c in calls}
+        put_map  = {p["strike"]: p.get("oi", 0) or 0 for p in puts}
+        all_strikes = sorted(set(list(call_map.keys()) + list(put_map.keys())))
 
     min_pain = None
     max_pain_strike = None
 
     for test_strike in all_strikes:
-        call_pain = sum(
-            max(0.0, test_strike - s) * oi
-            for s, oi in call_map.items()
-        )
-        put_pain = sum(
-            max(0.0, s - test_strike) * oi
-            for s, oi in put_map.items()
-        )
+        call_pain = sum(max(0.0, test_strike - s) * oi for s, oi in call_map.items())
+        put_pain  = sum(max(0.0, s - test_strike) * oi for s, oi in put_map.items())
         total = call_pain + put_pain
         if min_pain is None or total < min_pain:
             min_pain = total
@@ -124,8 +133,12 @@ def calc_max_pain(chain_data: dict) -> Optional[float]:
 
 def find_key_levels(calls: list, puts: list, spot: float) -> list[dict]:
     """
-    Identify strikes with unusually high OI that act as support/resistance.
-    Returns top 5 call OI (resistance) and top 5 put OI (support) strikes.
+    Identify strikes with high OI that act as support/resistance.
+    Role is determined by position relative to spot — NOT by option type:
+      - Call OI above spot → resistance (market makers short calls, hedge by selling)
+      - Call OI below spot → support (deep ITM calls create a price floor)
+      - Put OI below spot → support (market makers short puts, hedge by buying)
+      - Put OI above spot → resistance (deep ITM puts create a ceiling)
     """
     levels = []
 
@@ -136,12 +149,15 @@ def find_key_levels(calls: list, puts: list, spot: float) -> list[dict]:
             oi = c.get("oi", 0) or 0
             if oi < 100:
                 continue
+            strike = c["strike"]
+            pct = round((strike - spot) / spot * 100, 1)
+            role = "resistance" if strike >= spot else "support"
             levels.append({
-                "strike": c["strike"],
+                "strike": strike,
                 "oi": oi,
                 "type": "call",
-                "role": "resistance",
-                "pct_from_spot": round((c["strike"] - spot) / spot * 100, 1),
+                "role": role,
+                "pct_from_spot": pct,
                 "significance": round(oi / total_call_oi * 100, 1),
             })
 
@@ -152,12 +168,15 @@ def find_key_levels(calls: list, puts: list, spot: float) -> list[dict]:
             oi = p.get("oi", 0) or 0
             if oi < 100:
                 continue
+            strike = p["strike"]
+            pct = round((strike - spot) / spot * 100, 1)
+            role = "support" if strike <= spot else "resistance"
             levels.append({
-                "strike": p["strike"],
+                "strike": strike,
                 "oi": oi,
                 "type": "put",
-                "role": "support",
-                "pct_from_spot": round((p["strike"] - spot) / spot * 100, 1),
+                "role": role,
+                "pct_from_spot": pct,
                 "significance": round(oi / total_put_oi * 100, 1),
             })
 
@@ -165,23 +184,59 @@ def find_key_levels(calls: list, puts: list, spot: float) -> list[dict]:
 
 
 def generate_narrative(
-    ticker: str, spot: float, pc_ratio: float, atm_iv: float,
-    expected_move: dict, max_pain: Optional[float], key_levels: list,
-    selected_dte: int, timeframe: str,
+    ticker: str, spot: float, pc_ratio: float, pc_vol_ratio: Optional[float],
+    atm_iv: float, expected_move: dict, max_pain: Optional[float],
+    key_levels: list, selected_dte: int, timeframe: str,
+    pc_atm_ratio: Optional[float] = None,
 ) -> str:
     lines = []
 
-    # Sentiment from P/C ratio
-    if pc_ratio > 1.3:
-        sent = "bearish — put buying dominates, suggesting hedging or directional downside bets"
-    elif pc_ratio > 1.0:
-        sent = "mildly bearish — slight put dominance in positioning"
-    elif pc_ratio > 0.7:
-        sent = "neutral with slight bullish lean — balanced options activity"
+    # Signal priority:
+    # 1. ATM P/C OI — near-money only, strips far-OTM portfolio hedges → best near-term read
+    # 2. Overall P/C Volume — today's live flow across all strikes
+    # 3. Overall P/C OI — accumulated historical positioning (slowest signal)
+    if pc_atm_ratio is not None:
+        primary_ratio = pc_atm_ratio
+        primary_label = "ATM positioning"
+    elif pc_vol_ratio is not None:
+        primary_ratio = pc_vol_ratio
+        primary_label = "flow (volume)"
     else:
-        sent = "bullish — call buying dominates, reflecting upside positioning"
+        primary_ratio = pc_ratio
+        primary_label = "positioning (OI)"
 
-    lines.append(f"Options flow for {ticker} is {sent} (P/C OI ratio: {pc_ratio:.2f}).")
+    if primary_ratio > 1.3:
+        sent = f"bearish — put {primary_label} dominates near the money"
+    elif primary_ratio > 1.0:
+        sent = f"mildly bearish — slight put dominance in {primary_label}"
+    elif primary_ratio > 0.7:
+        sent = f"neutral — balanced {primary_label}"
+    else:
+        sent = f"bullish — call {primary_label} dominates near the money, reflecting upside positioning"
+
+    # Flag when ATM (near-money) diverges from the overall flow (which can be distorted by far-OTM hedges)
+    context_notes = []
+    if pc_atm_ratio is not None and pc_vol_ratio is not None:
+        atm_sent = "bearish" if pc_atm_ratio > 1.0 else "bullish"
+        vol_sent = "bearish" if pc_vol_ratio > 1.0 else "bullish"
+        if atm_sent != vol_sent:
+            context_notes.append(
+                f"Note: overall volume flow is {vol_sent} (P/C vol: {pc_vol_ratio:.2f}) but near-money (ATM) "
+                f"positioning is {atm_sent} (P/C ATM: {pc_atm_ratio:.2f}) — far-OTM puts (portfolio hedges) "
+                f"are distorting the overall ratio; ATM is the cleaner directional signal."
+            )
+    elif pc_vol_ratio is not None and pc_ratio is not None:
+        oi_sent  = "bearish" if pc_ratio > 1.0 else "bullish"
+        vol_sent = "bearish" if pc_vol_ratio > 1.0 else "bullish"
+        if oi_sent != vol_sent:
+            context_notes.append(
+                f"Note: OI is {oi_sent} (P/C OI: {pc_ratio:.2f}) but today's volume is {vol_sent} "
+                f"(P/C vol: {pc_vol_ratio:.2f}) — volume is the more current signal."
+            )
+
+    ratio_label = f"P/C ATM: {pc_atm_ratio:.2f}" if pc_atm_ratio is not None else f"P/C vol: {primary_ratio:.2f}"
+    conflict_str = " " + " ".join(context_notes) if context_notes else ""
+    lines.append(f"Options flow for {ticker} is {sent} ({ratio_label}).{conflict_str}")
 
     # Expected move
     em = expected_move
@@ -350,21 +405,33 @@ def get_analysis(ticker: str, timeframe: str = "3mo") -> dict:
         atm_call = min(calls, key=lambda c: abs(c["strike"] - spot))
         atm_iv = atm_call.get("iv")
 
-    # P/C ratio
-    total_call_oi = sum(c["oi"] for c in calls)
-    total_put_oi  = sum(p["oi"] for p in puts)
+    # OI-based P/C (accumulated historical positioning)
+    total_call_oi  = sum(c["oi"] for c in calls)
+    total_put_oi   = sum(p["oi"] for p in puts)
     pc_ratio = round(total_put_oi / total_call_oi, 3) if total_call_oi > 0 else None
+
+    # Volume-based P/C (today's live flow — more current signal)
+    total_call_vol = sum(c.get("volume") or 0 for c in calls)
+    total_put_vol  = sum(p.get("volume") or 0 for p in puts)
+    pc_vol_ratio = round(total_put_vol / total_call_vol, 3) if total_call_vol > 0 else None
+
+    # ATM P/C (±10% of spot — near-money only, less distorted by deep OTM)
+    atm_calls = [c for c in calls if spot * 0.90 <= c["strike"] <= spot * 1.10]
+    atm_puts  = [p for p in puts  if spot * 0.90 <= p["strike"] <= spot * 1.10]
+    atm_call_oi = sum(c["oi"] for c in atm_calls)
+    atm_put_oi  = sum(p["oi"] for p in atm_puts)
+    pc_atm_ratio = round(atm_put_oi / atm_call_oi, 3) if atm_call_oi > 0 else None
 
     # Expected move
     expected_move = None
     if atm_iv and atm_iv > 0:
         expected_move = calc_expected_move(spot, atm_iv, best_exp["dte"])
 
-    # Max pain (use all strikes)
+    # Max pain — filtered to ±40% of spot to exclude LEAPS distortion
     chain_for_pain = {"calls": calls, "puts": puts}
-    max_pain = calc_max_pain(chain_for_pain)
+    max_pain = calc_max_pain(chain_for_pain, spot)
 
-    # Key OI levels
+    # Key OI levels — role now based on position relative to spot
     key_levels = find_key_levels(calls, puts, spot)
 
     # Expiration label
@@ -378,12 +445,14 @@ def get_analysis(ticker: str, timeframe: str = "3mo") -> dict:
                 ticker=ticker,
                 spot=spot,
                 pc_ratio=pc_ratio,
+                pc_vol_ratio=pc_vol_ratio,
                 atm_iv=atm_iv,
                 expected_move=expected_move,
                 max_pain=max_pain,
                 key_levels=key_levels,
                 selected_dte=best_exp["dte"],
                 timeframe=timeframe,
+                pc_atm_ratio=pc_atm_ratio,
             )
         except Exception as e:
             logger.warning(f"Narrative generation failed: {e}")
@@ -408,8 +477,12 @@ def get_analysis(ticker: str, timeframe: str = "3mo") -> dict:
         "iv_52w_low": iv_rank_data.get("iv_52w_low"),
         "iv_52w_high": iv_rank_data.get("iv_52w_high"),
         "pc_ratio": pc_ratio,
+        "pc_vol_ratio": pc_vol_ratio,
+        "pc_atm_ratio": pc_atm_ratio,
         "total_call_oi": total_call_oi,
         "total_put_oi": total_put_oi,
+        "total_call_vol": total_call_vol,
+        "total_put_vol": total_put_vol,
         "expected_move": expected_move,
         "max_pain": max_pain,
         "key_levels": key_levels[:10],

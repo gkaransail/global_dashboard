@@ -17,7 +17,9 @@ function AISummaryStub({ ticker, data }) {
   // Replace this entire function body with a real AI API call when ready.
   if (!data) return null
 
-  const mood = data.pc_ratio > 1.2 ? 'cautious' : data.pc_ratio < 0.8 ? 'bullish' : 'mixed'
+  // Use ATM P/C as primary signal — strips far-OTM portfolio hedges that distort overall P/C
+  const primaryPC = data.pc_atm_ratio ?? data.pc_vol_ratio ?? data.pc_ratio
+  const mood = primaryPC > 1.2 ? 'cautious' : primaryPC < 0.8 ? 'bullish' : 'mixed'
   const ivWord = data.atm_iv_pct > 60 ? 'expensive' : data.atm_iv_pct > 35 ? 'normal-priced' : 'cheap'
   const em = data.expected_move
   const preview = em
@@ -46,13 +48,22 @@ function AISummaryStub({ ticker, data }) {
 }
 
 // Plain-English interpretation helpers
-function moodFromPC(pc) {
+// Uses ATM P/C as primary signal — near-money options strip out far-OTM portfolio hedges
+function moodFromPC(atm, vol, oi) {
+  const pc = atm ?? vol ?? oi
   if (!pc) return { label: 'Unknown', color: 'var(--muted)', emoji: '❓', explain: 'Not enough data.' }
-  if (pc > 1.4) return { label: 'Very Bearish', color: 'var(--bear)', emoji: '🔴', explain: 'Way more put (downside) bets than calls. Big players are hedging or betting on a drop.' }
-  if (pc > 1.1) return { label: 'Cautious', color: 'var(--bear)', emoji: '🟠', explain: 'More people buying protection (puts) than upside bets (calls). Mild caution in the market.' }
-  if (pc > 0.9) return { label: 'Neutral', color: 'var(--muted)', emoji: '🟡', explain: 'Roughly balanced between upside and downside bets. No clear directional conviction.' }
-  if (pc > 0.7) return { label: 'Bullish', color: 'var(--bull)', emoji: '🟢', explain: 'More call (upside) buying than put buying. Market leans bullish on this stock.' }
-  return { label: 'Very Bullish', color: 'var(--bull)', emoji: '🟢', explain: 'Heavily skewed toward calls. Strong bullish positioning from options traders.' }
+
+  // Detect when far-OTM hedges are distorting the overall ratio
+  const hedgesDistorting = atm != null && vol != null && ((atm > 1.0) !== (vol > 1.0))
+  const hedgeNote = hedgesDistorting
+    ? ` (Overall volume P/C is ${vol?.toFixed(2)} — higher because institutions are buying far-out-of-the-money puts as cheap portfolio insurance, not as directional bets.)`
+    : ''
+
+  if (pc > 1.4) return { label: 'Very Bearish', color: 'var(--bear)', emoji: '🔴', explain: `Near-money options heavily favor puts. Strong downside positioning from options traders.${hedgeNote}` }
+  if (pc > 1.1) return { label: 'Cautious', color: 'var(--bear)', emoji: '🟠', explain: `Near-money options lean toward puts. Mild caution or hedging near the current price.${hedgeNote}` }
+  if (pc > 0.9) return { label: 'Neutral', color: 'var(--muted)', emoji: '🟡', explain: `Balanced near-money options. No clear directional conviction from options traders.${hedgeNote}` }
+  if (pc > 0.7) return { label: 'Bullish', color: 'var(--bull)', emoji: '🟢', explain: `Near-money options favor calls. Options traders are positioning for upside.${hedgeNote}` }
+  return { label: 'Very Bullish', color: 'var(--bull)', emoji: '🟢', explain: `Near-money options are heavily skewed toward calls. Strong bullish conviction.${hedgeNote}` }
 }
 
 function ivWord(iv) {
@@ -81,7 +92,7 @@ function GlossaryCard() {
         {[
           { term: 'Call option', def: 'A bet that the stock goes UP. You profit if the stock rises above the strike price.' },
           { term: 'Put option', def: 'A bet that the stock goes DOWN. You profit if the stock falls below the strike price.' },
-          { term: 'P/C Ratio', def: 'Put-to-Call ratio. Above 1.0 means more bearish bets than bullish. Below 1.0 means more bullish bets.' },
+          { term: 'P/C Ratio', def: 'Put-to-Call ratio. Above 1.0 = more bearish bets. Below 1.0 = more bullish bets. "ATM P/C" uses only near-the-money strikes — more accurate for direction because it filters out far-OTM puts that institutions buy as cheap portfolio hedges.' },
           { term: 'Implied Volatility (IV)', def: 'How much movement the options market is pricing in. High IV = expensive options = big expected move.' },
           { term: 'Open Interest (OI)', def: 'How many contracts are currently open at a strike. High OI = lots of money sitting there = acts as support or resistance.' },
           { term: 'Max Pain', def: 'The price where option sellers (usually banks/market makers) lose the least money. Stocks often drift toward this level near expiry.' },
@@ -127,7 +138,7 @@ export default function OptionsOverview() {
   if (error)   return <div className="pad"><div className="error-box">⚠ {error}</div></div>
   if (!data)   return null
 
-  const mood   = moodFromPC(data.pc_ratio)
+  const mood   = moodFromPC(data.pc_atm_ratio, data.pc_vol_ratio, data.pc_ratio)
   const ivInfo = ivWord(data.atm_iv_pct)
   const em     = data.expected_move
   const vix    = macro?.vix
@@ -152,7 +163,7 @@ export default function OptionsOverview() {
           <div className="ov-glance-card">
             <div className="ov-glance-label">
               Market Mood
-              <Tooltip text={`Based on Put/Call ratio of ${data.pc_ratio?.toFixed(2)}. More puts = more bearish bets. More calls = more bullish bets.`} />
+              <Tooltip text={`Based on near-money (ATM) Put/Call ratio of ${data.pc_atm_ratio?.toFixed(2) ?? '—'}. Uses only strikes within ±10% of current price — filters out far-OTM puts bought as cheap portfolio insurance which distort the overall P/C ratio (${data.pc_ratio?.toFixed(2)}).`} />
             </div>
             <div className="ov-glance-val" style={{ color: mood.color }}>{mood.emoji} {mood.label}</div>
             <div className="ov-glance-explain">{mood.explain}</div>

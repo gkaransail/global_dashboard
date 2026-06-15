@@ -289,11 +289,21 @@ export default function OptionsChain() {
     setExps([]); setChain(null); setError(null); setSelected(null); setSnapshotExp(null)
     try {
       const d = await api.get(`/options/expirations/${ticker}`)
+      // yfinance returns {error: {message: "Too Many Requests"}} on rate limit
+      if (d.error && !d.expirations) {
+        const msg = d.error?.message || String(d.error)
+        setError(`Yahoo Finance error for "${ticker}": ${msg}. Wait a moment and retry.`)
+        return
+      }
       const allExps = d.expirations || []
       setExps(allExps)
       setSpot(d.spot_price)
+      if (!allExps.length) {
+        setError(`No options data found for "${ticker}". Check the ticker symbol — e.g. Micron is MU, not MICRON.`)
+        return
+      }
       // Set a fallback default — snapshot will override with the timeframe-optimal exp
-      if (allExps.length) setSelected(allExps[1]?.date || allExps[0].date)
+      setSelected(allExps[1]?.date || allExps[0].date)
     } catch (e) { setError(e.message) }
   }
 
@@ -301,6 +311,12 @@ export default function OptionsChain() {
     setLoading(true); setError(null)
     try {
       const d = await api.get(`/options/chain/${ticker}?expiration=${exp}&strike_range=${strikeRange}`)
+      // yfinance wraps invalid-expiration errors inside a 200 response body
+      if (d.error) {
+        const msg = typeof d.error === 'string' ? d.error : d.error.message || 'Failed to load chain'
+        setError(msg)
+        return
+      }
       setChain(d)
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }

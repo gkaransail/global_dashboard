@@ -66,8 +66,14 @@ export default function MarketSnapshot({ onExpSelected }) {
     finally { setLoading(false) }
   }
 
-  const pcColor = data?.pc_ratio > 1.1 ? 'var(--bear)' : data?.pc_ratio < 0.9 ? 'var(--bull)' : 'var(--muted)'
-  const pcLabel = data?.pc_ratio > 1.3 ? 'Bearish' : data?.pc_ratio > 1.0 ? 'Mildly Bearish' : data?.pc_ratio > 0.7 ? 'Neutral' : 'Bullish'
+  // Signal priority: ATM P/C (strips far-OTM hedges) > Volume P/C (live flow) > OI P/C (historical)
+  // ATM-only ratio is the cleanest near-term directional signal for 1-week outlooks
+  const signalRatio = data?.pc_atm_ratio ?? data?.pc_vol_ratio ?? data?.pc_ratio
+  const pcColor = signalRatio > 1.1 ? 'var(--bear)' : signalRatio < 0.9 ? 'var(--bull)' : 'var(--muted)'
+  const pcLabel = signalRatio > 1.3 ? 'Bearish' : signalRatio > 1.0 ? 'Mildly Bearish' : signalRatio > 0.7 ? 'Neutral' : 'Bullish'
+  // Detect ATM vs overall flow conflict (far-OTM hedges distorting overall P/C)
+  const hasConflict = data?.pc_atm_ratio != null && data?.pc_vol_ratio != null &&
+    ((data.pc_atm_ratio > 1.0) !== (data.pc_vol_ratio > 1.0))
 
   return (
     <div className="card" style={{ marginBottom: 4 }}>
@@ -100,13 +106,14 @@ export default function MarketSnapshot({ onExpSelected }) {
                 {/* Stat chips */}
                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
                   {[
-                    { label: 'Spot',     val: `$${data.spot_price}`,           color: 'var(--text)' },
-                    { label: 'ATM IV',   val: `${data.atm_iv_pct ?? '—'}%`,    color: 'var(--accent)' },
-                    { label: 'P/C Ratio',val: data.pc_ratio?.toFixed(2) ?? '—', color: pcColor },
-                    { label: 'Sentiment',val: pcLabel,                          color: pcColor },
-                    { label: 'Max Pain', val: data.max_pain ? `$${data.max_pain}` : '—', color: 'var(--gold)' },
-                  ].map(({ label, val, color }) => (
-                    <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    { label: 'Spot',        val: `$${data.spot_price}`,                          color: 'var(--text)' },
+                    { label: 'ATM IV',      val: `${data.atm_iv_pct ?? '—'}%`,                   color: 'var(--accent)' },
+                    { label: 'P/C ATM',     val: data.pc_atm_ratio?.toFixed(2) ?? '—',           color: data?.pc_atm_ratio < 0.9 ? 'var(--bull)' : data?.pc_atm_ratio > 1.1 ? 'var(--bear)' : 'var(--muted)', title: 'Near-money P/C — strips out far-OTM portfolio hedges' },
+                    { label: 'P/C Vol',     val: data.pc_vol_ratio?.toFixed(2) ?? '—',           color: data?.pc_vol_ratio < 0.9 ? 'var(--bull)' : data?.pc_vol_ratio > 1.1 ? 'var(--bear)' : 'var(--muted)', title: 'Overall volume P/C — includes far-OTM hedges' },
+                    { label: 'Sentiment',   val: hasConflict ? '⚡ Hedged' : pcLabel,            color: hasConflict ? 'var(--gold)' : pcColor },
+                    { label: 'Max Pain',    val: data.max_pain ? `$${data.max_pain}` : '—',      color: 'var(--gold)' },
+                  ].map(({ label, val, color, title }) => (
+                    <div key={label} title={title} style={{ display: 'flex', flexDirection: 'column', gap: 2, cursor: title ? 'help' : 'default' }}>
                       <span style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.5px' }}>{label}</span>
                       <span style={{ fontWeight: 700, fontSize: 14, color }}>{val}</span>
                     </div>

@@ -13,7 +13,7 @@ from core import cache as _cache
 from features.options.analyzers.chain import _safe_float, _safe_int, _dte
 
 logger = logging.getLogger(__name__)
-CACHE_TTL = 180
+CACHE_TTL = 600  # 10 min — reduces Yahoo Finance rate-limit hits
 
 
 def _atm_iv(df: pd.DataFrame, S: float) -> float | None:

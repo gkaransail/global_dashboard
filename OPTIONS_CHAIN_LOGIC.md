@@ -6,7 +6,11 @@ A plain-English + technical guide to every signal the dashboard computes, why ea
 
 ## Architecture Overview
 
+There are two entry points depending on which page you're on:
+
 ```
+── Single ticker (Options tab) ─────────────────────────────────────────
+
 User selects ticker + timeframe
         │
         ▼
@@ -19,10 +23,28 @@ analysis.py — get_analysis()
   ├── _pick_best_expiration()  → best expiry for the selected timeframe
   ├── yf.option_chain(exp)     → raw calls + puts from Yahoo Finance
   ├── calc_expected_move()     → ±1σ price range
-  ├── calc_max_pain()          → strike where option sellers lose least
+  ├── calc_max_pain()          → strike where option sellers lose least (±40% filter)
   ├── find_key_levels()        → high-OI strikes acting as support/resistance
   ├── calc_iv_rank()           → where current IV sits vs past year
   └── generate_narrative()     → plain-English summary of all signals
+
+
+── Top 20 Scanner (Options → Top Movers page) ──────────────────────────
+
+User selects timeframe (1w / 1mo / 3mo / 6mo / 1y)
+        │
+        ▼
+GET /api/v1/options/top-movers?timeframe=1w
+        │
+        ▼
+scanner.py — get_top_movers()
+  ├── ThreadPoolExecutor(12)   → parallel scan of 80+ stocks
+  ├── _score_ticker()          → calls get_analysis() per ticker, then scores:
+  │     ├── ATM P/C ratio      → ±3 points  (primary — strips far-OTM hedges)
+  │     ├── Max pain direction → ±1 point   (above/below spot)
+  │     └── IV rank            → ±1 point   (>70 bearish, <25 bullish)
+  ├── bullish = top 20 with score > 0, sorted desc
+  └── bearish = top 20 with score < 0, sorted asc
 ```
 
 ---
@@ -238,32 +260,72 @@ best_exp = min(candidates, key=lambda e: abs(e["dte"] - target_dte))
 ```
 backend/features/options/
   analyzers/
-    analysis.py     ← Main entry point: get_analysis(), generate_narrative()
-    chain.py        ← Raw chain fetch + Black-Scholes Greeks
-    skew.py         ← IV skew + term structure
-    unusual.py      ← Unusual activity detector (vol/OI ratio + premium score)
-  router.py         ← FastAPI routes: /analysis, /chain, /expirations, /skew, /unusual
+    analysis.py     ← Single-ticker: get_analysis(), generate_narrative(), calc_max_pain(), find_key_levels()
+    scanner.py      ← Top 20: get_top_movers(), _score_ticker() — parallel scan of 80+ stocks
+    chain.py        ← Raw chain fetch + Black-Scholes Greeks (delta, gamma, theta, vega)
+    skew.py         ← IV skew + term structure across expirations
+    unusual.py      ← Unusual activity detector (vol/OI ratio + premium value score)
+  router.py         ← FastAPI routes: /analysis, /top-movers, /chain, /expirations, /skew, /unusual
 
 frontend/src/features/options/
-  OptionsOverview.jsx   ← "At a Glance" page: mood, expected move, key levels
-  MarketSnapshot.jsx    ← Compact card shown at top of Options tab
-  OptionsChain.jsx      ← Full chain table with Greeks
-  VolSkew.jsx           ← IV skew chart
-  UnusualActivity.jsx   ← Unusual flow table
+  OptionsOverview.jsx    ← "At a Glance" page: mood card, expected move, key levels, glossary
+  MarketSnapshot.jsx     ← Compact summary card at top of Options tab
+  OptionsTopMovers.jsx   ← Top 20 bullish/bearish scanner with timeframe selector
+  OptionsChain.jsx       ← Full chain table with strike, IV, Greeks, OI, volume
+  VolSkew.jsx            ← IV skew chart (smile/smirk) + term structure
+  UnusualActivity.jsx    ← Unusual flow table ranked by score
 ```
+
+---
+
+## Top 20 Scanner — Scoring Logic
+
+The scanner runs `get_analysis()` on 80+ liquid stocks in parallel and ranks them using a composite score (−5 to +5):
+
+```python
+# 1. ATM P/C ratio — PRIMARY signal (±3 points)
+#    Uses pc_atm_ratio first, falls back to pc_vol_ratio, then pc_ratio
+pc = data.get('pc_atm_ratio') or data.get('pc_vol_ratio') or data.get('pc_ratio')
+
+if pc < 0.6:   score += 3   # Strong call dominance near the money
+elif pc < 0.8: score += 2   # Call-heavy near-money
+elif pc < 1.0: score += 1   # Mild bullish bias
+elif pc < 1.2: score -= 1   # Mild bearish bias
+elif pc < 1.5: score -= 2   # Put-heavy near-money
+else:          score -= 3   # Strong put dominance
+
+# 2. Max pain direction (±1 point)
+gap = (max_pain - spot) / spot
+if gap > 0.02:  score += 1   # Max pain above spot → price pulled up near expiry
+elif gap < -0.02: score -= 1  # Max pain below spot → price pulled down
+
+# 3. IV rank context (±1 point)
+if iv_rank > 70:  score -= 1   # Elevated fear, often precedes downside
+elif iv_rank < 25: score += 1  # Complacent market, often bullish
+```
+
+**Why ATM P/C is the primary scoring signal** — not overall P/C OI:
+
+Before the fix (June 2026), the scanner used `pc_ratio` (overall OI P/C). This caused a systematic error: stocks where institutions hold large positions AND buy far-OTM puts as cheap hedges (e.g. MU, SNDK) would show `pc_ratio > 1.4` (score: −3, "bearish") in the scanner, but show bullish when drilled into individually — because the detail pages were reading the ATM ratio. The fix aligns the scanner with the same ATM-first logic used everywhere else.
+
+**⚡ Hedged flag** — shown on individual rows when ATM is bullish but overall OI is bearish. This means the stock has genuine upside positioning near the money, but the institution also bought downside insurance. Not the same as bearish.
+
+**Cache:** Scanner results are cached 30 minutes per timeframe (`options:scanner:{timeframe}`). Each timeframe is independent — switching from 1w to 1mo triggers a fresh 80-stock scan.
 
 ---
 
 ## Why the Dashboard Used to Say Bearish (and How It Was Fixed)
 
-**The bug:** Three components (`OptionsOverview`, `MarketSnapshot`, and `generate_narrative`) were all using `pc_ratio` (overall OI P/C) as the primary sentiment signal. For stocks like MU and SNDK, institutions hold large stock positions and hedge them with far-OTM puts — driving `pc_ratio` above 1.0 (bearish) even when near-money positioning is clearly bullish.
+**The bug (June 2026):** Every component that showed a sentiment label — `OptionsOverview`, `MarketSnapshot`, `generate_narrative`, and `scanner.py` — was using `pc_ratio` (overall OI P/C) as the primary signal. For stocks like MU and SNDK, institutions hold large stock positions and hedge them with far-OTM puts, driving `pc_ratio` above 1.0 (bearish) even when near-money positioning is clearly bullish. The result: the Top 20 page showed MU as bearish (score −2), the Overview page said "Very Bearish," but clicking into the full analysis showed conflicting signals because the chain detail used a different calculation.
 
-**The fix (June 2026):**
-1. `analysis.py` — `generate_narrative()` now takes `pc_atm_ratio` and uses it as primary signal.
-2. `MarketSnapshot.jsx` — Sentiment chip now reads `pc_atm_ratio ?? pc_vol_ratio ?? pc_ratio`.
-3. `OptionsOverview.jsx` — `moodFromPC()` now takes all three ratios; explanation text mentions when far-OTM hedges are distorting the overall ratio.
-4. `calc_max_pain()` — Added ±40% spot filter to exclude LEAPS from the calculation.
-5. `find_key_levels()` — Role now based on strike position relative to spot, not option type.
+**The fix:**
+1. `analysis.py` — `generate_narrative()` uses `pc_atm_ratio` as primary; detects and explains when far-OTM hedges distort overall P/C.
+2. `MarketSnapshot.jsx` — Sentiment chip reads `pc_atm_ratio ?? pc_vol_ratio ?? pc_ratio`.
+3. `OptionsOverview.jsx` — `moodFromPC()` takes all three ratios; explanation text flags hedging distortion; tooltip shows ATM vs overall.
+4. `scanner.py` — `_score_ticker()` now uses ATM P/C as primary scoring signal; passes all three ratios to the frontend; adds `⚡ hedged` flag when they conflict.
+5. `OptionsTopMovers.jsx` — StockRow displays `pc_atm_ratio` chip; shows `⚡ hedged` badge; expiry chip includes DTE.
+6. `calc_max_pain()` — Added ±40% spot filter to exclude LEAPS from pulling max pain far below reality.
+7. `find_key_levels()` — Role now based on strike position relative to spot, not option type.
 
 ---
 

@@ -1,7 +1,12 @@
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from features.backtest import db, evaluator, rl
 
 router = APIRouter()
+
+
+class WatchlistBody(BaseModel):
+    tickers: list[str]
 
 
 @router.get("/stats")
@@ -46,6 +51,16 @@ def evaluate():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/force-evaluate")
+def force_evaluate():
+    """Evaluate all pending predictions NOW using current spot price, ignoring evaluation date."""
+    try:
+        result = evaluator.force_evaluate_all()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/train")
 def train():
     """Run RL weight update pass over all evaluated predictions."""
@@ -75,3 +90,53 @@ def reset_weights():
         return {"status": "reset"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Watchlist ─────────────────────────────────────────────────────────────────
+
+@router.get("/watchlist")
+def get_watchlist():
+    """Get the persisted watchlist."""
+    try:
+        db.init_db()
+        return {"tickers": db.get_watchlist()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/watchlist")
+def set_watchlist(body: WatchlistBody):
+    """Persist the full watchlist (replaces existing)."""
+    try:
+        db.init_db()
+        db.set_watchlist(body.tickers)
+        return {"tickers": db.get_watchlist()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/scan-watchlist")
+def scan_watchlist():
+    """
+    Run options analysis on every watchlist ticker and log predictions.
+    Uses source='watchlist' so results can be filtered separately.
+    """
+    from features.options.analyzers.analysis import get_analysis
+    from features.backtest.collector import log_prediction
+
+    db.init_db()
+    tickers = db.get_watchlist()
+    if not tickers:
+        return {"scanned": 0, "errors": [], "message": "Watchlist is empty"}
+
+    scanned = 0
+    errors  = []
+    for ticker in tickers:
+        try:
+            analysis = get_analysis(ticker, timeframe="1mo")
+            log_prediction(analysis, source="watchlist")
+            scanned += 1
+        except Exception as e:
+            errors.append({"ticker": ticker, "error": str(e)})
+
+    return {"scanned": scanned, "errors": errors, "tickers": tickers}

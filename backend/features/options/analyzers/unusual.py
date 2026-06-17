@@ -96,8 +96,12 @@ def get_unusual_activity(ticker: str, max_expirations: int = 6, min_score: float
 
     t = yf.Ticker(ticker.upper())
 
-    spot_df = t.history(period="1d", auto_adjust=True)
-    S = float(spot_df["Close"].iloc[-1]) if not spot_df.empty else None
+    try:
+        spot_df = t.history(period="1d", auto_adjust=True)
+        S = float(spot_df["Close"].iloc[-1]) if not spot_df.empty else None
+    except Exception as e:
+        logger.warning(f"Unusual history fetch failed for {ticker}: {e}")
+        S = None
     if S is None:
         return {"ticker": ticker.upper(), "error": "Could not fetch spot price", "activity": []}
 

@@ -76,6 +76,7 @@ def run_rl_update() -> dict:
     db.init_db()
     evaluated   = db.get_all_evaluated()
     weights     = db.get_signal_weights()
+    original_weights = {k: v["weight"] for k, v in weights.items()}
     changes: dict[str, dict] = {}
 
     # Per-signal running tallies
@@ -110,14 +111,14 @@ def run_rl_update() -> dict:
 
     # Persist updated weights
     for sig_name, w in weights.items():
-        total   = signal_total.get(sig_name, 0)
-        correct = signal_correct.get(sig_name, 0)
-        acc     = round(correct / total, 3) if total > 0 else w.get("accuracy")
+        total      = signal_total.get(sig_name, 0)
+        correct    = signal_correct.get(sig_name, 0)
+        acc        = round(correct / total, 3) if total > 0 else w.get("accuracy")
         new_weight = round(w["weight"], 3)
+        old_weight = round(original_weights.get(sig_name, w.get("base_weight", 1.0)), 3)
         db.update_signal_weight(sig_name, new_weight, acc, total)
-        old = w.get("weight", w.get("base_weight", 1.0))
-        if abs(new_weight - old) > 0.01:
-            changes[sig_name] = {"old": round(old, 3), "new": new_weight, "accuracy": acc, "samples": total}
+        if abs(new_weight - old_weight) > 0.001:
+            changes[sig_name] = {"old": old_weight, "new": new_weight, "accuracy": acc, "samples": total}
 
     return {
         "signals_updated": len(changes),

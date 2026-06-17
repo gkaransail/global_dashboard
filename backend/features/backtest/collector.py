@@ -38,7 +38,7 @@ def _already_logged_today(ticker: str, timeframe: str) -> bool:
     return row is not None
 
 
-def log_prediction(analysis: dict):
+def log_prediction(analysis: dict, source: str = "options_analysis"):
     """
     Called from get_analysis() after computing a fresh result.
     Stores the current signals + predicted direction for later evaluation.
@@ -104,6 +104,7 @@ def log_prediction(analysis: dict):
             "max_pain_pct":         mp_pct,
             "expected_move_pct":    em.get("move_pct"),
             "evaluate_after":       eval_date,
+            "source":               source,
         })
         logger.debug(f"Logged prediction: {ticker} {timeframe} score={score}")
     except Exception as e:

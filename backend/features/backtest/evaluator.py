@@ -70,3 +70,50 @@ def evaluate_pending() -> dict:
         )
 
     return {"evaluated": evaluated, "errors": errors, "pending_remaining": len(pending) - evaluated}
+
+
+def force_evaluate_all() -> dict:
+    """
+    Evaluate ALL pending predictions immediately using current spot price,
+    regardless of whether their evaluate_after date has passed.
+    Useful for testing the pipeline and seeing immediate results.
+    """
+    db.init_db()
+    pending   = db.get_pending()
+    evaluated = 0
+    errors    = 0
+
+    for pred in pending:
+        ticker    = pred["ticker"]
+        spot_then = pred["spot_at_prediction"]
+        direction = pred["direction"]
+
+        spot_now = _fetch_spot(ticker)
+        if spot_now is None or not spot_then:
+            errors += 1
+            continue
+
+        return_pct = round((spot_now - spot_then) / spot_then * 100, 3)
+
+        if direction == 1:
+            correct = 1 if return_pct > 0 else 0
+        elif direction == -1:
+            correct = 1 if return_pct < 0 else 0
+        else:
+            correct = 1 if abs(return_pct) < 1.0 else 0
+
+        db.mark_evaluated(
+            pred_id=pred["id"],
+            outcome_at=datetime.now(timezone.utc).isoformat(),
+            spot_outcome=round(spot_now, 2),
+            return_pct=return_pct,
+            correct=correct,
+        )
+        evaluated += 1
+        logger.info(
+            f"Force-evaluated {ticker} {pred['timeframe']}: "
+            f"predicted {'bull' if direction==1 else 'bear' if direction==-1 else 'neutral'}, "
+            f"actual {return_pct:+.2f}% → {'✓' if correct else '✗'}"
+        )
+
+    return {"evaluated": evaluated, "errors": errors, "mode": "force"}

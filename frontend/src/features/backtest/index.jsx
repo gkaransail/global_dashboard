@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { api } from '../../core/api'
+import { useStore } from '../../core/store'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -54,6 +55,20 @@ function WeightBar({ signal, weight, base, accuracy, samples }) {
   )
 }
 
+const SOURCE_BADGE = {
+  watchlist:       { bg: 'rgba(139,92,246,0.15)', color: '#a78bfa', label: 'watchlist' },
+  top_movers:      { bg: 'rgba(245,158,11,0.15)', color: '#fbbf24', label: 'top 20' },
+  options_analysis:{ bg: 'rgba(100,116,139,0.15)', color: '#94a3b8', label: 'analysis' },
+}
+function SourceBadge({ source }) {
+  const s = SOURCE_BADGE[source] || SOURCE_BADGE.options_analysis
+  return (
+    <span style={{ fontSize: 9, padding: '2px 5px', borderRadius: 4, background: s.bg, color: s.color, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.4px' }}>
+      {s.label}
+    </span>
+  )
+}
+
 function PredRow({ p }) {
   const dir     = dirLabel(p.direction)
   const retPct  = p.actual_return_pct
@@ -63,11 +78,13 @@ function PredRow({ p }) {
     <tr style={{ borderBottom: '1px solid var(--border)', fontSize: 12 }}>
       <td style={{ padding: '7px 10px', fontWeight: 700 }}>{p.ticker}</td>
       <td style={{ padding: '7px 10px', color: 'var(--muted)' }}>{p.timeframe}</td>
+      <td style={{ padding: '7px 10px' }}><SourceBadge source={p.source} /></td>
       <td style={{ padding: '7px 10px', color: dir.color, fontWeight: 600 }}>{dir.txt}</td>
       <td style={{ padding: '7px 10px', textAlign: 'right', color: (p.score ?? 0) > 0 ? 'var(--bull)' : (p.score ?? 0) < 0 ? 'var(--bear)' : 'var(--muted)', fontWeight: 700 }}>
         {p.score != null ? (p.score > 0 ? `+${p.score}` : p.score) : '—'}
       </td>
       <td style={{ padding: '7px 10px', textAlign: 'right', color: 'var(--muted)' }}>${fmt(p.spot_at_prediction, 2)}</td>
+      <td style={{ padding: '7px 10px', textAlign: 'right', color: 'var(--muted)' }}>{p.spot_at_outcome ? `$${fmt(p.spot_at_outcome, 2)}` : '—'}</td>
       <td style={{ padding: '7px 10px', textAlign: 'right', color: retPct != null ? pctColor(retPct) : 'var(--muted)', fontWeight: retPct != null ? 700 : 400 }}>
         {retPct != null ? `${retPct > 0 ? '+' : ''}${fmt(retPct, 2)}%` : '—'}
       </td>
@@ -87,6 +104,7 @@ function PendingRow({ p }) {
     <tr style={{ borderBottom: '1px solid var(--border)', fontSize: 12 }}>
       <td style={{ padding: '7px 10px', fontWeight: 700 }}>{p.ticker}</td>
       <td style={{ padding: '7px 10px', color: 'var(--muted)' }}>{p.timeframe}</td>
+      <td style={{ padding: '7px 10px' }}><SourceBadge source={p.source} /></td>
       <td style={{ padding: '7px 10px', color: dir.color, fontWeight: 600 }}>{dir.txt}</td>
       <td style={{ padding: '7px 10px', textAlign: 'right', color: (p.score ?? 0) > 0 ? 'var(--bull)' : (p.score ?? 0) < 0 ? 'var(--bear)' : 'var(--muted)', fontWeight: 700 }}>
         {p.score != null ? (p.score > 0 ? `+${p.score}` : p.score) : '—'}
@@ -100,18 +118,17 @@ function PendingRow({ p }) {
 // ── main component ────────────────────────────────────────────────────────────
 
 function BacktestDashboard() {
+  const watchlist = useStore(s => s.watchlist)
   const [stats,    setStats]    = useState(null)
   const [weights,  setWeights]  = useState([])
   const [preds,    setPreds]    = useState([])
   const [pending,  setPending]  = useState([])
-  const [tab,      setTab]      = useState('evaluated')
+  const [tab,      setTab]      = useState('pending')
   const [loading,  setLoading]  = useState(false)
   const [running,  setRunning]  = useState(false)
   const [msg,      setMsg]      = useState(null)
 
-  useEffect(() => { loadAll() }, [])
-
-  async function loadAll() {
+  const loadAll = useCallback(async () => {
     setLoading(true)
     try {
       const [s, w, p, pnd] = await Promise.all([
@@ -126,13 +143,44 @@ function BacktestDashboard() {
       setPending(pnd.pending || [])
     } catch (e) { setMsg({ type: 'error', text: e.message }) }
     finally { setLoading(false) }
-  }
+  }, [])
+
+  // Sync watchlist to backend whenever it changes
+  useEffect(() => {
+    if (watchlist.length > 0) {
+      api.post('/backtest/watchlist', { tickers: watchlist }).catch(() => {})
+    }
+  }, [watchlist])
+
+  useEffect(() => { loadAll() }, [loadAll])
 
   async function runEvaluate() {
     setRunning(true); setMsg(null)
     try {
       const r = await api.post('/backtest/evaluate', {})
-      setMsg({ type: 'ok', text: `Evaluated ${r.evaluated} predictions. ${r.errors} errors.` })
+      setMsg({ type: 'ok', text: `Evaluated ${r.evaluated} matured predictions. ${r.errors} errors.` })
+      await loadAll()
+    } catch (e) { setMsg({ type: 'error', text: e.message }) }
+    finally { setRunning(false) }
+  }
+
+  async function runForceEvaluate() {
+    if (!confirm('Force-evaluate ALL pending predictions against current prices now? This is useful for testing — predictions will be marked correct/wrong using today\'s spot price regardless of their evaluation window.')) return
+    setRunning(true); setMsg(null)
+    try {
+      const r = await api.post('/backtest/force-evaluate', {})
+      setMsg({ type: 'ok', text: `Force-evaluated ${r.evaluated} predictions. ${r.errors} errors.` })
+      setTab('evaluated')
+      await loadAll()
+    } catch (e) { setMsg({ type: 'error', text: e.message }) }
+    finally { setRunning(false) }
+  }
+
+  async function runScanWatchlist() {
+    setRunning(true); setMsg(null)
+    try {
+      const r = await api.post('/backtest/scan-watchlist', {})
+      setMsg({ type: 'ok', text: `Scanned ${r.scanned} watchlist tickers. ${r.errors?.length || 0} errors.` })
       await loadAll()
     } catch (e) { setMsg({ type: 'error', text: e.message }) }
     finally { setRunning(false) }
@@ -195,8 +243,14 @@ function BacktestDashboard() {
 
       {/* Action bar */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button onClick={runScanWatchlist} disabled={running} style={actionBtn('#0ea5e9')} title={`Scan ${watchlist.length} watchlist tickers`}>
+          📋 Scan Watchlist ({watchlist.length})
+        </button>
         <button onClick={runEvaluate}  disabled={running} style={actionBtn('var(--accent)')}>
-          {running ? '⏳ Running…' : '▶ Evaluate Matured'}
+          ▶ Evaluate Matured
+        </button>
+        <button onClick={runForceEvaluate} disabled={running} style={actionBtn('#f59e0b')} title="Evaluate all pending against current prices now">
+          ⚡ Force Evaluate All
         </button>
         <button onClick={runTrain}     disabled={running} style={actionBtn('#7c3aed')}>
           🧠 Run RL Training
@@ -290,8 +344,8 @@ function BacktestDashboard() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.4px', borderBottom: '1px solid var(--border)' }}>
-                      {['Ticker', 'TF', 'Direction', 'Score', 'Entry', 'Return', 'Result', 'Date'].map(h => (
-                        <th key={h} style={{ padding: '6px 10px', textAlign: h === 'Ticker' || h === 'TF' || h === 'Direction' ? 'left' : 'right', fontWeight: 600 }}>{h}</th>
+                      {['Ticker', 'TF', 'Source', 'Direction', 'Score', 'Entry', 'Exit', 'Return', 'Result', 'Date'].map(h => (
+                        <th key={h} style={{ padding: '6px 10px', textAlign: ['Ticker','TF','Source','Direction'].includes(h) ? 'left' : 'right', fontWeight: 600 }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -311,8 +365,8 @@ function BacktestDashboard() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.4px', borderBottom: '1px solid var(--border)' }}>
-                      {['Ticker', 'TF', 'Direction', 'Score', 'Entry', 'Eval Date'].map(h => (
-                        <th key={h} style={{ padding: '6px 10px', textAlign: h === 'Ticker' || h === 'TF' || h === 'Direction' ? 'left' : 'right', fontWeight: 600 }}>{h}</th>
+                      {['Ticker', 'TF', 'Source', 'Direction', 'Score', 'Entry', 'Eval Date'].map(h => (
+                        <th key={h} style={{ padding: '6px 10px', textAlign: ['Ticker','TF','Source','Direction'].includes(h) ? 'left' : 'right', fontWeight: 600 }}>{h}</th>
                       ))}
                     </tr>
                   </thead>

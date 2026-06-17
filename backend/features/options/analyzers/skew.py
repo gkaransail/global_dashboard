@@ -88,8 +88,12 @@ def get_skew(ticker: str, max_expirations: int = 8) -> dict:
         return cached
 
     t = yf.Ticker(ticker.upper())
-    spot_df = t.history(period="1d", auto_adjust=True)
-    S = float(spot_df["Close"].iloc[-1]) if not spot_df.empty else None
+    try:
+        spot_df = t.history(period="1d", auto_adjust=True)
+        S = float(spot_df["Close"].iloc[-1]) if not spot_df.empty else None
+    except Exception as e:
+        logger.warning(f"Skew history fetch failed for {ticker}: {e}")
+        S = None
     if S is None:
         return {"error": "Could not fetch spot price"}
 

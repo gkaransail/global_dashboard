@@ -43,7 +43,13 @@ def init_db():
             outcome_at               TEXT,
             spot_at_outcome          REAL,
             actual_return_pct        REAL,
-            correct                  INTEGER             -- 1 correct / 0 wrong / NULL pending
+            correct                  INTEGER,           -- 1 correct / 0 wrong / NULL pending
+            source                   TEXT    DEFAULT 'options_analysis'
+        );
+
+        CREATE TABLE IF NOT EXISTS watchlist (
+            ticker    TEXT PRIMARY KEY,
+            added_at  TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS signal_weights (
@@ -78,6 +84,12 @@ def init_db():
             defaults
         )
 
+        # Migrations for existing DBs
+        try:
+            conn.execute("ALTER TABLE predictions ADD COLUMN source TEXT DEFAULT 'options_analysis'")
+        except Exception:
+            pass  # column already exists
+
 
 def insert_prediction(p: dict) -> int:
     with _conn() as conn:
@@ -87,14 +99,15 @@ def insert_prediction(p: dict) -> int:
                 spot_at_prediction, pc_atm_ratio, pc_vol_ratio, pc_ratio,
                 iv_rank, short_pct_float, squeeze_candidate, gex_environment,
                 options_flow_significance, max_pain_pct, expected_move_pct,
-                evaluate_after
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                evaluate_after, source
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             p["ticker"], p["timeframe"], p["predicted_at"], p["direction"], p.get("score"),
             p["spot_at_prediction"], p.get("pc_atm_ratio"), p.get("pc_vol_ratio"), p.get("pc_ratio"),
             p.get("iv_rank"), p.get("short_pct_float"), int(p.get("squeeze_candidate") or 0),
             p.get("gex_environment"), p.get("options_flow_significance"),
             p.get("max_pain_pct"), p.get("expected_move_pct"), p["evaluate_after"],
+            p.get("source", "options_analysis"),
         ))
         return cur.lastrowid
 
@@ -190,3 +203,37 @@ def get_stats() -> dict:
         "bear_win_rate": round(bear_win / bear_eval * 100, 1) if bear_eval > 0 else None,
         "by_timeframe": [dict(r) for r in by_tf],
     }
+
+
+# ── Watchlist ─────────────────────────────────────────────────────────────────
+
+def get_watchlist() -> list[str]:
+    with _conn() as conn:
+        rows = conn.execute("SELECT ticker FROM watchlist ORDER BY added_at").fetchall()
+    return [r["ticker"] for r in rows]
+
+
+def set_watchlist(tickers: list[str]):
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn() as conn:
+        conn.execute("DELETE FROM watchlist")
+        conn.executemany(
+            "INSERT INTO watchlist(ticker, added_at) VALUES (?, ?)",
+            [(t.upper(), now) for t in tickers]
+        )
+
+
+def add_to_watchlist(ticker: str):
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO watchlist(ticker, added_at) VALUES (?, ?)",
+            (ticker.upper(), now)
+        )
+
+
+def remove_from_watchlist(ticker: str):
+    with _conn() as conn:
+        conn.execute("DELETE FROM watchlist WHERE ticker=?", (ticker.upper(),))

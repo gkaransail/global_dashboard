@@ -112,6 +112,9 @@ export default function MarketSnapshot({ onExpSelected }) {
                     { label: 'P/C Vol',     val: data.pc_vol_ratio?.toFixed(2) ?? '—',           color: data?.pc_vol_ratio < 0.9 ? 'var(--bull)' : data?.pc_vol_ratio > 1.1 ? 'var(--bear)' : 'var(--muted)', title: 'Overall volume P/C — includes far-OTM hedges' },
                     { label: 'Sentiment',   val: hasConflict ? '⚡ Hedged' : pcLabel,            color: hasConflict ? 'var(--gold)' : pcColor },
                     { label: 'Max Pain',    val: data.max_pain ? `$${data.max_pain}` : '—',      color: 'var(--gold)' },
+                    { label: 'Short %',     val: data.short_pct_float != null ? `${data.short_pct_float}%` : '—', color: data?.squeeze_candidate ? 'var(--gold)' : data?.short_pct_float > 15 ? 'var(--bear)' : 'var(--muted)', title: data?.days_to_cover ? `${data.days_to_cover}d to cover` : 'Short interest as % of float' },
+                    { label: 'Activity',    val: data.options_flow_significance ?? '—',           color: data?.options_flow_significance === 'Extreme' ? 'var(--bear)' : data?.options_flow_significance === 'Elevated' ? 'var(--gold)' : 'var(--muted)', title: `Options vol/OI: ${data?.options_activity_ratio?.toFixed(3) ?? '—'}` },
+                    { label: 'GEX Magnet',  val: data.gex?.max_gex_strike ? `$${data.gex.max_gex_strike}` : '—', color: 'var(--accent)', title: `Market maker gamma magnet. Environment: ${data?.gex?.environment ?? '—'}` },
                   ].map(({ label, val, color, title }) => (
                     <div key={label} title={title} style={{ display: 'flex', flexDirection: 'column', gap: 2, cursor: title ? 'help' : 'default' }}>
                       <span style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.5px' }}>{label}</span>

@@ -61,6 +61,7 @@ function StockRow({ rank, stock, isBull, onClick }) {
     ticker, score, spot_price, pc_atm_ratio, pc_vol_ratio, pc_ratio,
     pc_primary, pc_primary_label, atm_iv_pct,
     iv_rank, expected_move, signals, expiration_label, expiration_dte,
+    short_pct_float, squeeze_candidate, options_flow_significance, gex_environment,
   } = stock
 
   const hoverBorder = isBull ? 'rgba(34,197,94,0.5)' : 'rgba(239,68,68,0.5)'
@@ -127,6 +128,20 @@ function StockRow({ rank, stock, isBull, onClick }) {
         <Chip label="IV Rank" val={iv_rank    != null ? Math.round(iv_rank) : null}   color={ivrColor} />
         <Chip label="±Move"   val={expected_move ? `±${expected_move.move_pct}%` : null} color="var(--accent)" />
         <Chip label="Expiry"  val={expiration_label ? `${expiration_label}${expiration_dte != null ? ` (${expiration_dte}d)` : ''}` : null} />
+        {short_pct_float != null && (
+          <Chip
+            label="Short%"
+            val={`${short_pct_float}%`}
+            color={squeeze_candidate ? 'var(--gold)' : short_pct_float > 15 ? 'var(--bear)' : 'var(--muted)'}
+          />
+        )}
+        {options_flow_significance && options_flow_significance !== 'Normal' && (
+          <Chip
+            label="Activity"
+            val={options_flow_significance}
+            color={options_flow_significance === 'Extreme' ? 'var(--bear)' : 'var(--gold)'}
+          />
+        )}
       </div>
 
       <span style={{ color: 'var(--muted)', fontSize: 12, flexShrink: 0 }}>→</span>

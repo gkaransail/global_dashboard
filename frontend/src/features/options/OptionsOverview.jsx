@@ -229,6 +229,96 @@ export default function OptionsOverview() {
         </div>
       </div>
 
+      {/* ── Squeeze Alert ───────────────────────────────────── */}
+      {data.squeeze_candidate && (
+        <div style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.4)', borderRadius: 10, padding: '12px 16px', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+          <span style={{ fontSize: 20, lineHeight: 1 }}>⚡</span>
+          <div>
+            <div style={{ fontWeight: 700, color: 'var(--gold)', fontSize: 14, marginBottom: 3 }}>
+              Short Squeeze Candidate — {data.short_pct_float}% of float is short
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+              Heavy short positioning ({data.short_pct_float}% short float
+              {data.days_to_cover ? `, ${data.days_to_cover} days to cover at avg volume` : ''}) combined with
+              bullish near-money call positioning (ATM P/C {data.pc_atm_ratio?.toFixed(2)}) creates short-squeeze conditions.
+              If the stock breaks above a key resistance level, shorts may be forced to cover — accelerating the move upward.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Market Maker Positioning (GEX) ──────────────────── */}
+      {data.gex && data.gex.max_gex_strike && (
+        <div>
+          <div className="section-title">
+            Market Maker Positioning
+            <Tooltip text="Gamma Exposure (GEX) shows where market makers must buy or sell to hedge their options books. High positive GEX = price magnet (MMs stabilize). Negative GEX zone = price amplifier (MMs chase the move)." />
+          </div>
+          <div className="ov-glance-grid">
+
+            <div className="ov-glance-card">
+              <div className="ov-glance-label">
+                GEX Magnet
+                <Tooltip text="The strike with the highest gamma exposure. Market makers will actively buy dips and sell rallies near this level to stay delta-neutral — it acts as a gravitational pin." />
+              </div>
+              <div className="ov-glance-val" style={{ color: 'var(--accent)' }}>${data.gex.max_gex_strike}</div>
+              <div className="ov-glance-explain">
+                Strongest market maker pin level. Price tends to gravitate here, especially near expiry.
+              </div>
+            </div>
+
+            <div className="ov-glance-card">
+              <div className="ov-glance-label">
+                GEX Environment
+                <Tooltip text="Positive GEX = dealers are net long gamma. They sell into rallies and buy dips — dampening moves. Negative GEX = dealers are net short gamma. They chase the move in the same direction — amplifying it." />
+              </div>
+              <div className="ov-glance-val" style={{ color: data.gex.environment === 'positive' ? 'var(--bull)' : 'var(--bear)' }}>
+                {data.gex.environment === 'positive' ? '🟢 Stabilizing' : '🔴 Amplifying'}
+              </div>
+              <div className="ov-glance-explain">
+                {data.gex.environment === 'positive'
+                  ? `Total GEX is $${data.gex.total_gex_millions}M. Market makers are net long gamma — expect lower volatility and mean-reversion near key strikes.`
+                  : `Total GEX is $${data.gex.total_gex_millions}M. Market makers are net short gamma — expect larger-than-normal moves as they hedge by chasing price.`
+                }
+              </div>
+            </div>
+
+            {data.gex.gex_flip_level && (
+              <div className="ov-glance-card">
+                <div className="ov-glance-label">
+                  GEX Flip Level
+                  <Tooltip text="Below this strike, net gamma exposure turns negative. In a negative GEX zone, market makers amplify moves rather than dampen them — this is where volatility accelerates." />
+                </div>
+                <div className="ov-glance-val" style={{ color: 'var(--gold)' }}>${data.gex.gex_flip_level}</div>
+                <div className="ov-glance-explain">
+                  {data.gex.gex_flip_level < data.spot_price
+                    ? `${(((data.spot_price - data.gex.gex_flip_level) / data.spot_price) * 100).toFixed(1)}% below spot. A break below this level puts the market in a negative gamma zone — moves will be amplified.`
+                    : `Above current spot. Already in a negative gamma zone — expect elevated volatility.`
+                  }
+                </div>
+              </div>
+            )}
+
+            <div className="ov-glance-card">
+              <div className="ov-glance-label">
+                Options Activity
+                <Tooltip text="Ratio of total options volume traded today vs total open interest. High activity means unusually large flow — more conviction behind the signal." />
+              </div>
+              <div className="ov-glance-val" style={{ color: data.options_flow_significance === 'Extreme' ? 'var(--bear)' : data.options_flow_significance === 'Elevated' ? 'var(--gold)' : 'var(--muted)' }}>
+                {data.options_flow_significance ?? '—'}
+              </div>
+              <div className="ov-glance-explain">
+                {data.options_activity_ratio != null
+                  ? `${(data.options_activity_ratio * 100).toFixed(1)}% of open interest traded today.${data.vol_vs_avg ? ` Stock volume is ${data.vol_vs_avg}x the 30-day average.` : ''}`
+                  : 'Options activity data unavailable.'
+                }
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
       {/* ── Floor & Ceiling ─────────────────────────────────── */}
       {(topResistance || topSupport) && (
         <div>

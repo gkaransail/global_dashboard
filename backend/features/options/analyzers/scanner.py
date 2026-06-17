@@ -112,6 +112,22 @@ def _score_ticker(ticker: str, timeframe: str) -> dict | None:
             score += 1
             signals.append(f'Low IV rank ({iv_rank:.0f}) — quiet/complacent market')
 
+    # ── Short squeeze bonus (±1) ──────────────────────────────────────────
+    short_pct = data.get('short_pct_float') or 0
+    if short_pct > 15 and pc < 0.8:
+        score += 1
+        signals.append(f'Squeeze candidate ({short_pct:.1f}% short float + bullish ATM)')
+    elif short_pct > 20 and pc > 1.2:
+        score -= 1
+        signals.append(f'High short float ({short_pct:.1f}%) — vulnerable to squeeze but bearish flow')
+
+    # ── Options flow significance bonus ───────────────────────────────────
+    sig = data.get('options_flow_significance')
+    if sig == 'Extreme':
+        signals.append('Extreme options activity today')
+    elif sig == 'Elevated':
+        signals.append('Elevated options activity today')
+
     score = max(-5, min(5, score))
 
     return {
@@ -124,14 +140,21 @@ def _score_ticker(ticker: str, timeframe: str) -> dict | None:
         'pc_atm_ratio':     round(pc_atm, 2) if pc_atm is not None else None,
         'pc_primary':       round(pc, 2),
         'pc_primary_label': pc_label,
-        'atm_iv_pct':       atm_iv,
-        'iv_rank':          iv_rank,
-        'expected_move':    em,
-        'max_pain':         max_pain,
-        'signals':          signals,
-        'expiration_label': data.get('selected_expiration', {}).get('label'),
-        'expiration_dte':   data.get('selected_expiration', {}).get('dte'),
-        'timeframe':        timeframe,
+        'atm_iv_pct':               atm_iv,
+        'iv_rank':                  iv_rank,
+        'expected_move':            em,
+        'max_pain':                 max_pain,
+        'signals':                  signals,
+        'expiration_label':         data.get('selected_expiration', {}).get('label'),
+        'expiration_dte':           data.get('selected_expiration', {}).get('dte'),
+        'timeframe':                timeframe,
+        'short_pct_float':          data.get('short_pct_float'),
+        'days_to_cover':            data.get('days_to_cover'),
+        'squeeze_candidate':        data.get('squeeze_candidate'),
+        'vol_vs_avg':               data.get('vol_vs_avg'),
+        'options_flow_significance': data.get('options_flow_significance'),
+        'gex_max_strike':           (data.get('gex') or {}).get('max_gex_strike'),
+        'gex_environment':          (data.get('gex') or {}).get('environment'),
     }
 
 

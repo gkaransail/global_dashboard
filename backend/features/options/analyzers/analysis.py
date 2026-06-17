@@ -12,7 +12,25 @@ import yfinance as yf
 from core import cache as _cache
 
 logger = logging.getLogger(__name__)
-CACHE_TTL = 600  # 10 min — reduces Yahoo Finance rate-limit hits
+CACHE_TTL = 600       # 10 min
+RISK_FREE_RATE = 0.045  # ~3-month T-bill
+
+
+# ── Black-Scholes gamma (used for GEX) ───────────────────────────────────────
+
+def _norm_pdf(x: float) -> float:
+    return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
+
+
+def _bs_gamma(S: float, K: float, T: float, sigma: float) -> float:
+    """Black-Scholes gamma. Returns 0 on degenerate inputs."""
+    if T <= 1e-6 or sigma <= 1e-6 or S <= 0 or K <= 0:
+        return 0.0
+    try:
+        d1 = (math.log(S / K) + (RISK_FREE_RATE + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+        return _norm_pdf(d1) / (S * sigma * math.sqrt(T))
+    except Exception:
+        return 0.0
 
 
 def timeframe_to_days(timeframe: str) -> int:
@@ -188,6 +206,10 @@ def generate_narrative(
     atm_iv: float, expected_move: dict, max_pain: Optional[float],
     key_levels: list, selected_dte: int, timeframe: str,
     pc_atm_ratio: Optional[float] = None,
+    short_pct: Optional[float] = None,
+    days_to_cover: Optional[float] = None,
+    vol_vs_avg: Optional[float] = None,
+    gex: Optional[dict] = None,
 ) -> str:
     lines = []
 
@@ -280,7 +302,165 @@ def generate_narrative(
     else:
         lines.append(f"ATM IV of {atm_iv*100:.0f}% is low — options are cheap, market expects a quiet period.")
 
+    # Short interest — squeeze detection
+    if short_pct is not None and short_pct > 5:
+        primary = pc_atm_ratio if pc_atm_ratio is not None else (pc_vol_ratio if pc_vol_ratio is not None else pc_ratio)
+        if short_pct > 15 and primary is not None and primary < 0.8:
+            dtc_str = f", {days_to_cover}d to cover" if days_to_cover else ""
+            lines.append(f"⚡ Squeeze candidate: {short_pct}% of float is short{dtc_str} — heavy short interest combined with bullish call positioning creates short-squeeze conditions.")
+        elif short_pct > 10:
+            lines.append(f"Short interest is elevated at {short_pct}% of float — watch for covering rallies.")
+
+    # Stock volume context
+    if vol_vs_avg is not None and vol_vs_avg > 1.5:
+        lines.append(f"Stock volume is {vol_vs_avg}x the 30-day average — today's options flow is backed by above-normal equity participation.")
+
+    # GEX context
+    if gex and gex.get("max_gex_strike"):
+        env = gex["environment"]
+        mag = gex["max_gex_strike"]
+        flip = gex.get("gex_flip_level")
+        env_desc = "stabilizing (market makers will resist large moves)" if env == "positive" else "amplifying (market makers will chase moves, increasing volatility)"
+        flip_str = f" GEX flips negative below ${flip} — moves below that level will be amplified." if flip else ""
+        lines.append(f"Gamma exposure is {env_desc}. Strongest MM magnet at ${mag}.{flip_str}")
+
     return " ".join(lines)
+
+
+def calc_gex(calls: list, puts: list, spot: float, T: float) -> dict:
+    """
+    Gamma Exposure (GEX) per strike.
+
+    Convention:
+      Call GEX = +gamma × OI × spot × 100  (dealers short calls → long delta hedge)
+      Put  GEX = -gamma × OI × spot × 100  (dealers short puts  → short delta hedge)
+      Net  GEX = call_gex - put_gex
+
+    Positive net GEX at a strike → price magnet (MMs buy dips / sell rallies near it)
+    Negative net GEX             → amplifier   (MMs chase the move, making it larger)
+    GEX flip level               → highest strike below spot where net GEX turns negative;
+                                   below this the market is in a "negative gamma" zone.
+    """
+    strike_map: dict[float, dict] = {}
+
+    for c in calls:
+        strike = c.get("strike") or 0.0
+        iv     = c.get("iv") or 0.0
+        oi     = c.get("oi") or 0
+        if not (strike and iv and oi):
+            continue
+        gex = _bs_gamma(spot, strike, T, iv) * oi * spot * 100
+        entry = strike_map.setdefault(strike, {"call_gex": 0.0, "put_gex": 0.0})
+        entry["call_gex"] += gex
+
+    for p in puts:
+        strike = p.get("strike") or 0.0
+        iv     = p.get("iv") or 0.0
+        oi     = p.get("oi") or 0
+        if not (strike and iv and oi):
+            continue
+        gex = _bs_gamma(spot, strike, T, iv) * oi * spot * 100
+        entry = strike_map.setdefault(strike, {"call_gex": 0.0, "put_gex": 0.0})
+        entry["put_gex"] += gex
+
+    if not strike_map:
+        return {
+            "by_strike": [], "max_gex_strike": None,
+            "gex_flip_level": None, "total_gex_millions": 0.0, "environment": "neutral",
+        }
+
+    by_strike = []
+    for s in sorted(strike_map):
+        call_g = strike_map[s]["call_gex"]
+        put_g  = strike_map[s]["put_gex"]
+        net    = call_g - put_g
+        by_strike.append({
+            "strike":   s,
+            "net_gex":  round(net    / 1e6, 3),
+            "call_gex": round(call_g / 1e6, 3),
+            "put_gex":  round(put_g  / 1e6, 3),
+        })
+
+    max_gex_strike = max(
+        strike_map,
+        key=lambda s: strike_map[s]["call_gex"] - strike_map[s]["put_gex"]
+    )
+
+    # Gamma flip: highest strike ≤ spot where net GEX is negative
+    gex_flip_level = None
+    for item in reversed([x for x in by_strike if x["strike"] <= spot]):
+        if item["net_gex"] < 0:
+            gex_flip_level = item["strike"]
+            break
+
+    total_gex = sum(
+        strike_map[s]["call_gex"] - strike_map[s]["put_gex"]
+        for s in strike_map
+    )
+
+    return {
+        "by_strike":          by_strike,
+        "max_gex_strike":     max_gex_strike,
+        "gex_flip_level":     gex_flip_level,
+        "total_gex_millions": round(total_gex / 1e6, 2),
+        "environment":        "positive" if total_gex > 0 else "negative",
+    }
+
+
+def _get_short_interest(ticker: str) -> dict:
+    """Short interest from ticker.info. Cached 24 h (updates weekly)."""
+    cache_key = f"short_interest_{ticker}"
+    cached = _cache.get(cache_key, ttl=86400)
+    if cached:
+        return cached
+    try:
+        info = yf.Ticker(ticker).info
+        raw_pct = info.get("shortPercentOfFloat")
+        raw_dtc = info.get("shortRatio")
+        def _sf(v):
+            try:
+                f = float(v)
+                return None if (f != f) else f
+            except Exception:
+                return None
+        short_pct = _sf(raw_pct)
+        days_to_cover = _sf(raw_dtc)
+        result = {
+            "short_pct_float":  round(short_pct * 100, 1) if short_pct else None,
+            "days_to_cover":    round(days_to_cover, 1) if days_to_cover else None,
+        }
+    except Exception as e:
+        logger.debug(f"Short interest fetch failed {ticker}: {e}")
+        result = {"short_pct_float": None, "days_to_cover": None}
+    _cache.set(cache_key, result)
+    return result
+
+
+def _get_vol_vs_avg(ticker: str) -> dict:
+    """Today's stock volume vs 30-day average. Cached 1 h."""
+    cache_key = f"vol_vs_avg_{ticker}"
+    cached = _cache.get(cache_key, ttl=3600)
+    if cached:
+        return cached
+    try:
+        hist = yf.Ticker(ticker).history(period="35d", interval="1d", auto_adjust=True)
+        if hist is None or len(hist) < 5:
+            return {"vol_vs_avg": None, "vol_ratio_label": None}
+        today_vol = float(hist["Volume"].iloc[-1])
+        avg_30d   = float(hist["Volume"].iloc[:-1].tail(30).mean())
+        ratio = round(today_vol / avg_30d, 2) if avg_30d > 0 else None
+        label = (
+            "Extreme" if ratio and ratio > 3.0 else
+            "Elevated" if ratio and ratio > 1.5 else
+            "Normal"   if ratio and ratio > 0.7 else
+            "Quiet"    if ratio else None
+        )
+        result = {"vol_vs_avg": ratio, "vol_ratio_label": label}
+    except Exception as e:
+        logger.debug(f"Vol vs avg failed {ticker}: {e}")
+        result = {"vol_vs_avg": None, "vol_ratio_label": None}
+    _cache.set(cache_key, result)
+    return result
 
 
 def calc_iv_rank(ticker: str, current_iv: float) -> dict:
@@ -422,71 +602,105 @@ def get_analysis(ticker: str, timeframe: str = "3mo") -> dict:
     atm_put_oi  = sum(p["oi"] for p in atm_puts)
     pc_atm_ratio = round(atm_put_oi / atm_call_oi, 3) if atm_call_oi > 0 else None
 
+    # Time to expiration — needed for GEX gamma calculations
+    T = max(best_exp["dte"] / 365.0, 1.0 / 365.0)
+
     # Expected move
     expected_move = None
     if atm_iv and atm_iv > 0:
         expected_move = calc_expected_move(spot, atm_iv, best_exp["dte"])
 
     # Max pain — filtered to ±40% of spot to exclude LEAPS distortion
-    chain_for_pain = {"calls": calls, "puts": puts}
-    max_pain = calc_max_pain(chain_for_pain, spot)
+    max_pain = calc_max_pain({"calls": calls, "puts": puts}, spot)
 
-    # Key OI levels — role now based on position relative to spot
+    # Key OI levels — role based on position relative to spot
     key_levels = find_key_levels(calls, puts, spot)
+
+    # Gamma Exposure — strongest price magnet + flip level
+    gex = calc_gex(calls, puts, spot, T)
+
+    # Options activity ratio — how much of OI traded today
+    total_oi  = total_call_oi + total_put_oi
+    total_vol = total_call_vol + total_put_vol
+    options_activity_ratio = round(total_vol / total_oi, 3) if total_oi > 0 else None
+    options_flow_significance = (
+        "Extreme"  if options_activity_ratio and options_activity_ratio > 0.15 else
+        "Elevated" if options_activity_ratio and options_activity_ratio > 0.08 else
+        "Normal"   if options_activity_ratio and options_activity_ratio > 0.03 else
+        "Quiet"    if options_activity_ratio else None
+    )
+
+    # Short interest + squeeze detection
+    si = _get_short_interest(ticker)
+    short_pct     = si.get("short_pct_float")
+    days_to_cover = si.get("days_to_cover")
+    primary_pc    = pc_atm_ratio if pc_atm_ratio is not None else (pc_vol_ratio if pc_vol_ratio is not None else pc_ratio)
+    squeeze_candidate = bool(
+        short_pct and short_pct > 15 and
+        primary_pc is not None and primary_pc < 0.8
+    )
+
+    # Stock volume vs 30-day average
+    vva = _get_vol_vs_avg(ticker)
 
     # Expiration label
     exp_label = datetime.strptime(best_exp["date"], "%Y-%m-%d").strftime("%b %d")
 
     # Narrative
+    iv_rank_data = calc_iv_rank(ticker, atm_iv) if atm_iv else {}
     narrative = None
     if atm_iv and pc_ratio and expected_move:
         try:
             narrative = generate_narrative(
-                ticker=ticker,
-                spot=spot,
-                pc_ratio=pc_ratio,
-                pc_vol_ratio=pc_vol_ratio,
-                atm_iv=atm_iv,
-                expected_move=expected_move,
-                max_pain=max_pain,
-                key_levels=key_levels,
-                selected_dte=best_exp["dte"],
-                timeframe=timeframe,
-                pc_atm_ratio=pc_atm_ratio,
+                ticker=ticker, spot=spot, pc_ratio=pc_ratio,
+                pc_vol_ratio=pc_vol_ratio, atm_iv=atm_iv,
+                expected_move=expected_move, max_pain=max_pain,
+                key_levels=key_levels, selected_dte=best_exp["dte"],
+                timeframe=timeframe, pc_atm_ratio=pc_atm_ratio,
+                short_pct=short_pct, days_to_cover=days_to_cover,
+                vol_vs_avg=vva.get("vol_vs_avg"), gex=gex,
             )
         except Exception as e:
             logger.warning(f"Narrative generation failed: {e}")
 
-    iv_rank_data = calc_iv_rank(ticker, atm_iv) if atm_iv else {}
-
     result = {
-        "ticker": ticker,
+        "ticker":    ticker,
         "timeframe": timeframe,
         "spot_price": round(spot, 2),
         "selected_expiration": {
-            "date": best_exp["date"],
-            "label": exp_label,
-            "dte": best_exp["dte"],
+            "date": best_exp["date"], "label": exp_label, "dte": best_exp["dte"],
         },
         "available_expirations": [
             {"date": e["date"], "dte": e["dte"]} for e in filtered_exps
         ],
-        "atm_iv_pct": round(atm_iv * 100, 1) if atm_iv else None,
-        "iv_rank": iv_rank_data.get("iv_rank"),
-        "iv_percentile": iv_rank_data.get("iv_percentile"),
-        "iv_52w_low": iv_rank_data.get("iv_52w_low"),
-        "iv_52w_high": iv_rank_data.get("iv_52w_high"),
-        "pc_ratio": pc_ratio,
-        "pc_vol_ratio": pc_vol_ratio,
-        "pc_atm_ratio": pc_atm_ratio,
-        "total_call_oi": total_call_oi,
-        "total_put_oi": total_put_oi,
+        "atm_iv_pct":     round(atm_iv * 100, 1) if atm_iv else None,
+        "iv_rank":        iv_rank_data.get("iv_rank"),
+        "iv_percentile":  iv_rank_data.get("iv_percentile"),
+        "iv_52w_low":     iv_rank_data.get("iv_52w_low"),
+        "iv_52w_high":    iv_rank_data.get("iv_52w_high"),
+        "pc_ratio":       pc_ratio,
+        "pc_vol_ratio":   pc_vol_ratio,
+        "pc_atm_ratio":   pc_atm_ratio,
+        "total_call_oi":  total_call_oi,
+        "total_put_oi":   total_put_oi,
         "total_call_vol": total_call_vol,
-        "total_put_vol": total_put_vol,
+        "total_put_vol":  total_put_vol,
+        # Short interest
+        "short_pct_float":    short_pct,
+        "days_to_cover":      days_to_cover,
+        "squeeze_candidate":  squeeze_candidate,
+        # Volume context
+        "vol_vs_avg":               vva.get("vol_vs_avg"),
+        "vol_ratio_label":          vva.get("vol_ratio_label"),
+        "options_activity_ratio":   options_activity_ratio,
+        "options_flow_significance": options_flow_significance,
+        # GEX
+        "gex": gex,
+        # Core outputs
         "expected_move": expected_move,
-        "max_pain": max_pain,
-        "key_levels": key_levels[:10],
-        "narrative": narrative,
+        "max_pain":      max_pain,
+        "key_levels":    key_levels[:10],
+        "narrative":     narrative,
     }
 
     _cache.set(cache_key, result)

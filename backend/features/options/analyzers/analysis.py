@@ -704,4 +704,12 @@ def get_analysis(ticker: str, timeframe: str = "3mo") -> dict:
     }
 
     _cache.set(cache_key, result)
+
+    # Log prediction for backtesting (non-blocking — never raises)
+    try:
+        from features.backtest.collector import log_prediction
+        log_prediction(result)
+    except Exception:
+        pass
+
     return result

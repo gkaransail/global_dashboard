@@ -165,6 +165,19 @@ export const FEATURES = [
     ],
   },
 
+  // ── BACKTEST ──────────────────────────────────────────────────────────────
+  {
+    id: 'backtest',
+    label: 'Backtest & RL',
+    icon: '🧠',
+    status: 'live',
+    section: 'ai',
+    description: 'Track options signal predictions, evaluate outcomes, and use RL to optimize signal weights.',
+    subOptions: [
+      { id: 'dashboard', label: '🧠 Dashboard', icon: '🧠', path: '/backtest/dashboard' },
+    ],
+  },
+
   // ── AI ────────────────────────────────────────────────────────────────────
   {
     id: 'ai_agent',

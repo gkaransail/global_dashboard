@@ -17,6 +17,7 @@ import MarketIntelFeature from './features/market_intel/index'
 import InstitutionalFeature from './features/institutional/index'
 import PortfolioFeature from './features/portfolio/index'
 import AlertsFeature from './features/alerts/index'
+import BacktestFeature from './features/backtest/index'
 
 export default function App() {
   return (
@@ -42,6 +43,7 @@ export default function App() {
             <Route path="/institutional/*" element={<InstitutionalFeature />} />
             <Route path="/portfolio/*"     element={<PortfolioFeature />} />
             <Route path="/alerts/*"        element={<AlertsFeature />} />
+            <Route path="/backtest/*"      element={<BacktestFeature />} />
             {/* Smart Money merged into Stock Rankings — redirect old URLs */}
             <Route path="/smart_money/*"   element={<Navigate to="/market_intel/smart_money" replace />} />
             <Route path="*"                element={<Navigate to="/" replace />} />

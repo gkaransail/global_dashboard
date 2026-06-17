@@ -115,6 +115,178 @@ function PendingRow({ p }) {
   )
 }
 
+// ── Federation Panel ──────────────────────────────────────────────────────────
+
+function FederationPanel() {
+  const [peerUrl, setPeerUrl]     = useState('')
+  const [status,  setStatus]      = useState(null)  // null | 'pinging' | {ok} | {error}
+  const [compare, setCompare]     = useState(null)
+  const [cmpTicker, setCmpTicker] = useState('AAPL')
+  const [syncing,  setSyncing]    = useState(false)
+  const [merging,  setMerging]    = useState(false)
+  const [fedMsg,   setFedMsg]     = useState(null)
+  const [open,     setOpen]       = useState(false)
+
+  async function pingPeer() {
+    if (!peerUrl) return
+    setStatus('pinging'); setFedMsg(null); setCompare(null)
+    try {
+      const r = await api.get(`/federation/status`)
+      // ping the peer directly
+      const peer = await fetch(`${peerUrl.replace(/\/$/, '')}/api/v1/federation/status`)
+      if (!peer.ok) throw new Error(`Peer returned ${peer.status}`)
+      const pd = await peer.json()
+      setStatus({ ok: true, peer: pd })
+    } catch (e) { setStatus({ ok: false, error: e.message }) }
+  }
+
+  async function runCompare() {
+    if (!peerUrl || !cmpTicker) return
+    setFedMsg(null); setCompare(null)
+    try {
+      const r = await api.get(`/federation/compare/${cmpTicker.toUpperCase()}?peer_url=${encodeURIComponent(peerUrl)}&timeframe=1mo`)
+      setCompare(r)
+    } catch (e) { setFedMsg({ type: 'error', text: e.message }) }
+  }
+
+  async function syncPredictions() {
+    if (!peerUrl) return
+    setSyncing(true); setFedMsg(null)
+    try {
+      const exp = await fetch(`${peerUrl.replace(/\/$/, '')}/api/v1/federation/predictions/export?limit=500`)
+      const data = await exp.json()
+      const imp = await api.post('/federation/predictions/import', { predictions: data.predictions || [], peer_url: peerUrl })
+      setFedMsg({ type: 'ok', text: `Imported ${imp.imported} predictions (${imp.skipped} skipped). Now run RL Training to improve weights.` })
+    } catch (e) { setFedMsg({ type: 'error', text: e.message }) }
+    finally { setSyncing(false) }
+  }
+
+  async function mergeWeights() {
+    if (!peerUrl) return
+    setMerging(true); setFedMsg(null)
+    try {
+      const r = await api.post('/federation/weights/merge', { peer_url: peerUrl })
+      setFedMsg({ type: 'ok', text: `Merged ${r.merged} signal weights with peer. ${Object.keys(r.changes || {}).join(', ') || 'No significant changes'}.` })
+    } catch (e) { setFedMsg({ type: 'error', text: e.message }) }
+    finally { setMerging(false) }
+  }
+
+  const busy = syncing || merging
+
+  return (
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 18px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={() => setOpen(o => !o)}>
+        <span style={{ fontSize: 16 }}>🔗</span>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>Federation — Connect to a Peer Dashboard</div>
+        <span style={{ marginLeft: 'auto', color: 'var(--muted)', fontSize: 12 }}>{open ? '▲ collapse' : '▼ expand'}</span>
+      </div>
+
+      {!open && (
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+          Compare signals, pool predictions, and merge RL weights with a friend's dashboard via MCP.
+        </div>
+      )}
+
+      {open && (
+        <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+          {/* MCP setup instructions */}
+          <div style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 11, color: 'var(--muted)' }}>
+            <div style={{ fontWeight: 700, color: '#a5b4fc', marginBottom: 6 }}>MCP Setup (one-time, lets Claude call both dashboards)</div>
+            <div style={{ fontFamily: 'monospace', background: 'rgba(0,0,0,0.3)', padding: '6px 10px', borderRadius: 6, marginBottom: 6, whiteSpace: 'pre-wrap' }}>
+{`# Add YOUR dashboard to Claude Code:
+claude mcp add my-dashboard --transport sse --url http://localhost:8000/mcp/sse
+
+# Add FRIEND's dashboard (replace with their ngrok URL):
+claude mcp add friend-dashboard --transport sse --url https://<ngrok-url>/mcp/sse
+
+# Your friend runs this on their machine:
+ngrok http 8000`}
+            </div>
+            <div>Once connected, Claude can call <code>compare_with_peer</code>, <code>sync_peer_predictions</code>, and <code>merge_peer_weights</code> tools across both dashboards in one conversation.</div>
+          </div>
+
+          {/* Peer URL + ping */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              value={peerUrl}
+              onChange={e => setPeerUrl(e.target.value)}
+              placeholder="Peer dashboard URL — e.g. https://abc123.ngrok.io"
+              style={{ flex: 1, minWidth: 260, padding: '7px 10px', borderRadius: 6, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: 12 }}
+            />
+            <button onClick={pingPeer} disabled={!peerUrl || status === 'pinging'} style={{ padding: '7px 14px', borderRadius: 6, background: '#4f46e5', color: '#fff', border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+              {status === 'pinging' ? '⏳ Pinging…' : '🔗 Ping Peer'}
+            </button>
+          </div>
+
+          {/* Peer status */}
+          {status && status !== 'pinging' && (
+            <div style={{ fontSize: 11, padding: '8px 12px', borderRadius: 6, background: status.ok ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', border: `1px solid ${status.ok ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`, color: status.ok ? 'var(--bull)' : 'var(--bear)' }}>
+              {status.ok ? (
+                <>✅ Peer reachable — {status.peer?.stats?.total_predictions || 0} predictions, {status.peer?.stats?.win_rate_pct ?? '—'}% win rate, {status.peer?.signal_count} signals tracked</>
+              ) : (
+                <>❌ Peer unreachable: {status.error}</>
+              )}
+            </div>
+          )}
+
+          {/* Federation actions */}
+          {status?.ok && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input value={cmpTicker} onChange={e => setCmpTicker(e.target.value.toUpperCase())} placeholder="AAPL" style={{ width: 70, padding: '5px 8px', borderRadius: 6, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: 12 }} />
+                <button onClick={runCompare} disabled={busy} style={{ padding: '6px 12px', borderRadius: 6, background: '#0ea5e9', color: '#fff', border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  ⚡ Compare Signals
+                </button>
+              </div>
+              <button onClick={syncPredictions} disabled={busy} style={{ padding: '6px 12px', borderRadius: 6, background: '#7c3aed', color: '#fff', border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                {syncing ? '⏳ Syncing…' : '📥 Sync Predictions'}
+              </button>
+              <button onClick={mergeWeights} disabled={busy} style={{ padding: '6px 12px', borderRadius: 6, background: '#059669', color: '#fff', border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                {merging ? '⏳ Merging…' : '🧬 Merge Weights'}
+              </button>
+            </div>
+          )}
+
+          {fedMsg && (
+            <div style={{ fontSize: 11, padding: '8px 12px', borderRadius: 6, background: fedMsg.type === 'ok' ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', border: `1px solid ${fedMsg.type === 'ok' ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`, color: fedMsg.type === 'ok' ? 'var(--bull)' : 'var(--bear)' }}>
+              {fedMsg.text}
+            </div>
+          )}
+
+          {/* Comparison result */}
+          {compare && (
+            <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '12px 14px' }}>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10 }}>
+                {compare.ticker} — {compare.verdict === 'agree' ? '✅ Both dashboards agree' : '⚠️ Dashboards disagree'} on direction
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, fontSize: 11 }}>
+                <div style={{ fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', fontSize: 9 }}>Signal</div>
+                <div style={{ fontWeight: 600, color: '#60a5fa', fontSize: 9 }}>YOUR DASHBOARD</div>
+                <div style={{ fontWeight: 600, color: '#f59e0b', fontSize: 9 }}>PEER DASHBOARD</div>
+                {['pc_atm_ratio','iv_rank','direction','squeeze','gex_environment','options_flow'].map(f => {
+                  const c = compare.comparison?.[f] || {}
+                  const differ = c.local !== c.peer
+                  return [
+                    <div key={f+'-k'} style={{ color: 'var(--muted)', padding: '3px 0', borderTop: '1px solid var(--border)' }}>{f}</div>,
+                    <div key={f+'-l'} style={{ color: differ ? '#f87171' : 'var(--text)', padding: '3px 0', borderTop: '1px solid var(--border)', fontWeight: differ ? 700 : 400 }}>{c.local ?? '—'}</div>,
+                    <div key={f+'-p'} style={{ color: differ ? '#f87171' : 'var(--text)', padding: '3px 0', borderTop: '1px solid var(--border)', fontWeight: differ ? 700 : 400 }}>{c.peer ?? '—'}</div>,
+                  ]
+                })}
+              </div>
+              {compare.disagreements?.length > 0 && (
+                <div style={{ marginTop: 10, fontSize: 11, color: '#fbbf24' }}>
+                  ⚠️ Disagreements on: {compare.disagreements.join(', ')} — these are uncertainty zones where neither model should have high conviction.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── main component ────────────────────────────────────────────────────────────
 
 function BacktestDashboard() {
@@ -378,6 +550,9 @@ function BacktestDashboard() {
             )
         )}
       </div>
+
+      {/* Federation Panel */}
+      <FederationPanel />
 
       {/* How it works */}
       <div className="ov-glossary">

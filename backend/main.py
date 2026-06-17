@@ -28,6 +28,7 @@ from core import scheduler as _scheduler
 from core.config import settings
 from core.exceptions import AppException, app_exception_handler, http_exception_handler, unhandled_exception_handler
 from features import registry
+from mcp_server import mcp
 
 
 # ── Lifespan: start/stop background scheduler ────────────────────────────────
@@ -70,6 +71,10 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 _features_dir = Path(__file__).parent / "features"
 registry.discover(_features_dir)
 registry.mount_all(app, prefix=settings.api_prefix)
+
+# Mount MCP server at /mcp — exposes SSE endpoint at /mcp/sse
+# Claude Code config: {"servers": {"my-dashboard": {"transport": "sse", "url": "http://localhost:8000/mcp/sse"}}}
+app.mount("/mcp", mcp.sse_app())
 
 
 # ── Built-in endpoints ────────────────────────────────────────────────────────

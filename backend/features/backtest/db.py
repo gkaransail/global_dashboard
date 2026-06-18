@@ -88,7 +88,11 @@ def init_db():
         try:
             conn.execute("ALTER TABLE predictions ADD COLUMN source TEXT DEFAULT 'options_analysis'")
         except Exception:
-            pass  # column already exists
+            pass
+        try:
+            conn.execute("ALTER TABLE predictions ADD COLUMN feature TEXT DEFAULT 'options'")
+        except Exception:
+            pass
 
 
 def insert_prediction(p: dict) -> int:
@@ -99,8 +103,8 @@ def insert_prediction(p: dict) -> int:
                 spot_at_prediction, pc_atm_ratio, pc_vol_ratio, pc_ratio,
                 iv_rank, short_pct_float, squeeze_candidate, gex_environment,
                 options_flow_significance, max_pain_pct, expected_move_pct,
-                evaluate_after, source
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                evaluate_after, source, feature
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             p["ticker"], p["timeframe"], p["predicted_at"], p["direction"], p.get("score"),
             p["spot_at_prediction"], p.get("pc_atm_ratio"), p.get("pc_vol_ratio"), p.get("pc_ratio"),
@@ -108,6 +112,7 @@ def insert_prediction(p: dict) -> int:
             p.get("gex_environment"), p.get("options_flow_significance"),
             p.get("max_pain_pct"), p.get("expected_move_pct"), p["evaluate_after"],
             p.get("source", "options_analysis"),
+            p.get("feature", "options"),
         ))
         return cur.lastrowid
 
@@ -203,6 +208,84 @@ def get_stats() -> dict:
         "bear_win_rate": round(bear_win / bear_eval * 100, 1) if bear_eval > 0 else None,
         "by_timeframe": [dict(r) for r in by_tf],
     }
+
+
+# ── Leaderboard ───────────────────────────────────────────────────────────────
+
+def get_feature_stats() -> list[dict]:
+    """Win rate + accuracy per feature for the leaderboard scoreboard."""
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                COALESCE(feature, 'options') as feature,
+                COUNT(*) as total,
+                SUM(CASE WHEN evaluated=1 THEN 1 ELSE 0 END) as evaluated,
+                SUM(CASE WHEN correct=1 THEN 1 ELSE 0 END) as correct,
+                SUM(CASE WHEN evaluated=1 AND direction=1 THEN 1 ELSE 0 END) as bull_eval,
+                SUM(CASE WHEN correct=1 AND direction=1 THEN 1 ELSE 0 END) as bull_wins,
+                SUM(CASE WHEN evaluated=1 AND direction=-1 THEN 1 ELSE 0 END) as bear_eval,
+                SUM(CASE WHEN correct=1 AND direction=-1 THEN 1 ELSE 0 END) as bear_wins,
+                AVG(CASE WHEN evaluated=1 THEN actual_return_pct * direction ELSE NULL END) as avg_directional_return
+            FROM predictions
+            WHERE source LIKE 'leaderboard%' OR feature IS NOT NULL
+            GROUP BY COALESCE(feature, 'options')
+            ORDER BY feature
+        """).fetchall()
+    out = []
+    for r in rows:
+        ev = r["evaluated"] or 0
+        correct = r["correct"] or 0
+        bull_eval = r["bull_eval"] or 0
+        bear_eval = r["bear_eval"] or 0
+        out.append({
+            "feature":       r["feature"],
+            "total":         r["total"],
+            "evaluated":     ev,
+            "pending":       r["total"] - ev,
+            "win_rate_pct":  round(correct / ev * 100, 1) if ev > 0 else None,
+            "bull_win_rate": round(r["bull_wins"] / bull_eval * 100, 1) if bull_eval > 0 else None,
+            "bear_win_rate": round(r["bear_wins"] / bear_eval * 100, 1) if bear_eval > 0 else None,
+            "avg_return":    round(r["avg_directional_return"], 2) if r["avg_directional_return"] is not None else None,
+        })
+    return out
+
+
+def get_feature_picks(timeframe: str, limit: int = 20) -> list[dict]:
+    """Most recent picks per feature for a given timeframe, with evaluation results."""
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT p.*,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY feature, ticker, direction
+                       ORDER BY predicted_at DESC
+                   ) as rn
+            FROM predictions p
+            WHERE (source LIKE 'leaderboard%' OR feature IS NOT NULL)
+              AND timeframe = ?
+              AND feature IS NOT NULL
+        """, (timeframe,)).fetchall()
+    # Keep only the latest per (feature, ticker, direction)
+    seen = set()
+    results = []
+    for r in rows:
+        r = dict(r)
+        key = (r.get("feature"), r.get("ticker"), r.get("direction"))
+        if key not in seen and r.get("rn") == 1:
+            seen.add(key)
+            results.append(r)
+    results.sort(key=lambda x: (x.get("feature") or "", -(x.get("score") or 0)))
+    return results[:limit * 4]  # up to limit per feature × 4 features
+
+
+def leaderboard_prediction_exists(ticker: str, feature: str, timeframe: str, date_str: str) -> bool:
+    """Check if a prediction already exists for this ticker+feature+timeframe on this date."""
+    with _conn() as conn:
+        row = conn.execute("""
+            SELECT id FROM predictions
+            WHERE ticker=? AND feature=? AND timeframe=?
+              AND DATE(predicted_at)=?
+        """, (ticker, feature, timeframe, date_str)).fetchone()
+    return row is not None
 
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────

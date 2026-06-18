@@ -56,6 +56,7 @@ from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 
 logger = logging.getLogger(__name__)
@@ -127,6 +128,28 @@ def _warm_news_sentiment():
         logger.error(f"[warm] news sentiment failed: {e}")
 
 
+def _leaderboard_weekly_scan():
+    """Log weekly Top-20 picks from all 4 feature scanners into the predictions DB."""
+    try:
+        from features.leaderboard.scanner import run_scan
+        result = run_scan("weekly")
+        total = sum(v.get("logged", 0) for v in result.get("features", {}).values() if isinstance(v, dict))
+        logger.info(f"[leaderboard] weekly scan complete — {total} predictions logged")
+    except Exception as e:
+        logger.error(f"[leaderboard] weekly scan failed: {e}")
+
+
+def _leaderboard_monthly_scan():
+    """Log monthly Top-20 picks from all 4 feature scanners into the predictions DB."""
+    try:
+        from features.leaderboard.scanner import run_scan
+        result = run_scan("monthly")
+        total = sum(v.get("logged", 0) for v in result.get("features", {}).values() if isinstance(v, dict))
+        logger.info(f"[leaderboard] monthly scan complete — {total} predictions logged")
+    except Exception as e:
+        logger.error(f"[leaderboard] monthly scan failed: {e}")
+
+
 def _warm_options_top():
     """Pre-warm options analysis (IV rank, chain summary) for top tickers."""
     try:
@@ -194,11 +217,21 @@ def _register_jobs(scheduler: BackgroundScheduler) -> None:
             name=job_id,
             max_instances=1,
             replace_existing=True,
-            # Run immediately at startup so the cache is warm from the first request
             next_run_time=datetime.now(timezone.utc),
         )
         _job_stats[job_id] = {"last_run": None, "status": "pending", "next_run": None}
         logger.info(f"[scheduler] registered: {job_id} every {interval_minutes}m")
+
+    # Leaderboard scans — cron-based (weekly Monday 6am UTC, monthly 1st 6am UTC)
+    cron_jobs = [
+        ("leaderboard_weekly",  _leaderboard_weekly_scan,  CronTrigger(day_of_week="mon", hour=6, minute=0, timezone="UTC")),
+        ("leaderboard_monthly", _leaderboard_monthly_scan, CronTrigger(day=1,             hour=6, minute=0, timezone="UTC")),
+    ]
+    for job_id, func, trigger in cron_jobs:
+        scheduler.add_job(func, trigger=trigger, id=job_id, name=job_id,
+                          max_instances=1, replace_existing=True)
+        _job_stats[job_id] = {"last_run": None, "status": "pending", "next_run": None}
+        logger.info(f"[scheduler] registered: {job_id} (cron)")
 
 
 def start() -> BackgroundScheduler:

@@ -199,3 +199,23 @@ def get_top_movers(timeframe: str = '1mo') -> dict:
     }
     _cache.set(cache_key, result)
     return result
+
+
+def top20(timeframe: str = "1mo") -> dict:
+    """Standardized top20 for the leaderboard scanner."""
+    raw = get_top_movers(timeframe)
+    def _fmt(items, direction):
+        return [
+            {
+                "ticker":    r["ticker"],
+                "direction": direction,
+                "score":     abs(r.get("score", 0)),
+                "spot":      r.get("spot"),
+                "signals":   r.get("signals", []),
+            }
+            for r in items[:20]
+        ]
+    return {
+        "bullish": _fmt(raw.get("bullish", []), 1),
+        "bearish": _fmt(raw.get("bearish", []), -1),
+    }

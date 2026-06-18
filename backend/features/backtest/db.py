@@ -217,7 +217,7 @@ def get_feature_stats() -> list[dict]:
     with _conn() as conn:
         rows = conn.execute("""
             SELECT
-                COALESCE(feature, 'options') as feature,
+                feature,
                 COUNT(*) as total,
                 SUM(CASE WHEN evaluated=1 THEN 1 ELSE 0 END) as evaluated,
                 SUM(CASE WHEN correct=1 THEN 1 ELSE 0 END) as correct,
@@ -227,8 +227,9 @@ def get_feature_stats() -> list[dict]:
                 SUM(CASE WHEN correct=1 AND direction=-1 THEN 1 ELSE 0 END) as bear_wins,
                 AVG(CASE WHEN evaluated=1 THEN actual_return_pct * direction ELSE NULL END) as avg_directional_return
             FROM predictions
-            WHERE source LIKE 'leaderboard%' OR feature IS NOT NULL
-            GROUP BY COALESCE(feature, 'options')
+            WHERE source LIKE 'leaderboard:%'
+              AND feature IS NOT NULL
+            GROUP BY feature
             ORDER BY feature
         """).fetchall()
     out = []
@@ -251,39 +252,33 @@ def get_feature_stats() -> list[dict]:
 
 
 def get_feature_picks(timeframe: str, limit: int = 20) -> list[dict]:
-    """Most recent picks per feature for a given timeframe, with evaluation results."""
+    """Latest picks per feature for a given timeframe (leaderboard scans only)."""
     with _conn() as conn:
         rows = conn.execute("""
-            SELECT p.*,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY feature, ticker, direction
-                       ORDER BY predicted_at DESC
-                   ) as rn
-            FROM predictions p
-            WHERE (source LIKE 'leaderboard%' OR feature IS NOT NULL)
-              AND timeframe = ?
-              AND feature IS NOT NULL
+            SELECT * FROM (
+                SELECT p.*,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY feature, ticker, direction
+                           ORDER BY predicted_at DESC
+                       ) as rn
+                FROM predictions p
+                WHERE source LIKE 'leaderboard:%'
+                  AND timeframe = ?
+                  AND feature IS NOT NULL
+            ) WHERE rn = 1
+            ORDER BY feature, score DESC
         """, (timeframe,)).fetchall()
-    # Keep only the latest per (feature, ticker, direction)
-    seen = set()
-    results = []
-    for r in rows:
-        r = dict(r)
-        key = (r.get("feature"), r.get("ticker"), r.get("direction"))
-        if key not in seen and r.get("rn") == 1:
-            seen.add(key)
-            results.append(r)
-    results.sort(key=lambda x: (x.get("feature") or "", -(x.get("score") or 0)))
-    return results[:limit * 4]  # up to limit per feature × 4 features
+    return [dict(r) for r in rows]
 
 
 def leaderboard_prediction_exists(ticker: str, feature: str, timeframe: str, date_str: str) -> bool:
-    """Check if a prediction already exists for this ticker+feature+timeframe on this date."""
+    """Check if a leaderboard prediction already exists for this ticker+feature+timeframe today."""
     with _conn() as conn:
         row = conn.execute("""
             SELECT id FROM predictions
             WHERE ticker=? AND feature=? AND timeframe=?
               AND DATE(predicted_at)=?
+              AND source LIKE 'leaderboard:%'
         """, (ticker, feature, timeframe, date_str)).fetchone()
     return row is not None
 

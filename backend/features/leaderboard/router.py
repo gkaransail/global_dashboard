@@ -95,7 +95,6 @@ def get_comparison(
 
     FEATURES = ["options", "technical", "insider", "institutional"]
 
-    # Build matrix: ticker → feature → {direction, score, return_pct, correct, evaluated}
     matrix: dict[str, dict] = {}
     for pick in picks:
         ticker  = pick["ticker"]

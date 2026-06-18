@@ -87,6 +87,116 @@ function RegimeChart({ chartData }) {
   )
 }
 
+// ── Bollinger Band chart ──────────────────────────────────────────────────────
+
+function BollingerChart({ chartData }) {
+  const series = chartData?.price_series ?? []
+  if (series.length < 20) return null
+
+  const W = 560, H = 80
+  const prices = series.map(d => d.price)
+  const uppers = series.map(d => d.upper).filter(Boolean)
+  const lowers = series.map(d => d.lower).filter(Boolean)
+  const allVals = [...prices, ...uppers, ...lowers].filter(Boolean)
+  const minV = Math.min(...allVals) * 0.998
+  const maxV = Math.max(...allVals) * 1.002
+  const scaleY = v => H - ((v - minV) / (maxV - minV)) * H
+  const scaleX = i => (i / (series.length - 1)) * W
+
+  const polyline = (vals) =>
+    vals.map((v, i) => `${scaleX(i)},${scaleY(v)}`).join(' ')
+
+  // Band fill polygon
+  const bandPoly = series
+    .map((d, i) => d.upper ? `${scaleX(i)},${scaleY(d.upper)}` : '')
+    .filter(Boolean)
+    .concat(
+      series.slice().reverse()
+        .map((d, i) => d.lower ? `${scaleX(series.length - 1 - i)},${scaleY(d.lower)}` : '')
+        .filter(Boolean)
+    ).join(' ')
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>Bollinger Bands (20d, 2σ) — last 6 months</div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+        style={{ display: 'block', borderRadius: 6 }}>
+        {/* Band fill */}
+        <polygon points={bandPoly} fill="#fbbf2415" />
+        {/* Upper band */}
+        <polyline points={polyline(uppers)} fill="none" stroke="#fbbf2460" strokeWidth={1} />
+        {/* Lower band */}
+        <polyline points={polyline(lowers)} fill="none" stroke="#fbbf2460" strokeWidth={1} />
+        {/* Mean */}
+        <polyline points={polyline(series.map(d => d.mean).filter(Boolean))}
+          fill="none" stroke="#fbbf2490" strokeWidth={1} strokeDasharray="4,3" />
+        {/* Price */}
+        <polyline points={polyline(prices)} fill="none" stroke="var(--accent)" strokeWidth={1.5} />
+        {/* Current price dot */}
+        <circle cx={scaleX(series.length - 1)} cy={scaleY(prices[prices.length - 1])}
+          r={3} fill="var(--accent)" />
+      </svg>
+      <div style={{ display: 'flex', gap: 16, marginTop: 4, fontSize: 11, color: 'var(--muted)' }}>
+        <span style={{ color: 'var(--accent)' }}>— Price</span>
+        <span style={{ color: '#fbbf24' }}>— Bands / Mean</span>
+      </div>
+    </div>
+  )
+}
+
+// ── Z-score chart ─────────────────────────────────────────────────────────────
+
+function ZScoreChart({ chartData, meta }) {
+  const series = chartData?.z_series ?? []
+  if (series.length < 20) return null
+
+  const W = 560, H = 70
+  const zVals = series.map(d => d.z)
+  const minV  = Math.min(-2.5, ...zVals)
+  const maxV  = Math.max(2.5, ...zVals)
+  const scaleY = v => H - ((v - minV) / (maxV - minV)) * H
+  const scaleX = i => (i / (series.length - 1)) * W
+  const zeroY  = scaleY(0)
+  const p1Y    = scaleY(1), n1Y = scaleY(-1)
+  const p2Y    = scaleY(2), n2Y = scaleY(-2)
+
+  const polyline = zVals.map((v, i) => `${scaleX(i)},${scaleY(v)}`).join(' ')
+  const currentZ = zVals[zVals.length - 1]
+  const zColor = currentZ < -1 ? 'var(--bull)' : currentZ > 1 ? 'var(--bear)' : 'var(--muted)'
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>Z-score (20d) — last 6 months</div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+        style={{ display: 'block', borderRadius: 6, background: 'var(--surface2)' }}>
+        {/* Overbought zone */}
+        <rect x={0} y={p2Y} width={W} height={p1Y - p2Y} fill="#f8717110" />
+        {/* Oversold zone */}
+        <rect x={0} y={n1Y} width={W} height={n2Y - n1Y} fill="#4ade8010" />
+        {/* Reference lines */}
+        {[[zeroY, '#ffffff20', ''], [p1Y, '#f8717140', ''], [n1Y, '#4ade8040', ''],
+          [p2Y, '#f87171aa', '2σ'], [n2Y, '#4ade80aa', '-2σ']].map(([y, c, label], i) => (
+          <g key={i}>
+            <line x1={0} y1={y} x2={W} y2={y} stroke={c} strokeWidth={1} strokeDasharray={i > 0 ? '3,3' : ''} />
+            {label && <text x={W - 2} y={y - 2} fontSize={8} fill={c} textAnchor="end">{label}</text>}
+          </g>
+        ))}
+        {/* Z-score line */}
+        <polyline points={polyline} fill="none" stroke={zColor} strokeWidth={1.5} />
+        {/* Current dot */}
+        <circle cx={scaleX(series.length - 1)} cy={scaleY(currentZ)} r={3} fill={zColor} />
+      </svg>
+      <div style={{ display: 'flex', gap: 16, marginTop: 4, fontSize: 11 }}>
+        <span style={{ color: 'var(--bull)' }}>■ Oversold zone</span>
+        <span style={{ color: 'var(--bear)' }}>■ Overbought zone</span>
+        <span style={{ color: 'var(--muted)', marginLeft: 'auto' }}>
+          Current Z: <strong style={{ color: zColor }}>{currentZ > 0 ? '+' : ''}{currentZ?.toFixed(2)}</strong>
+        </span>
+      </div>
+    </div>
+  )
+}
+
 // ── Transition matrix ─────────────────────────────────────────────────────────
 
 function TransitionMatrix({ matrix }) {
@@ -208,12 +318,39 @@ function ResultCard({ result }) {
             </div>
           )}
 
-          {/* Regime chart */}
-          {result.chart_data && <RegimeChart chartData={result.chart_data} />}
+          {/* Model-specific charts */}
+          {result.model_id === 'regime_detection' && result.chart_data && (
+            <RegimeChart chartData={result.chart_data} />
+          )}
+          {result.model_id === 'mean_reversion' && result.chart_data && (
+            <>
+              <BollingerChart chartData={result.chart_data} />
+              <ZScoreChart chartData={result.chart_data} meta={result.meta} />
+            </>
+          )}
 
           {/* Model-specific extras */}
           {result.meta?.transition_matrix && (
             <TransitionMatrix matrix={result.meta.transition_matrix} />
+          )}
+
+          {/* Mean reversion key stats */}
+          {result.model_id === 'mean_reversion' && result.meta && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+              {[
+                { label: 'Z-score 20d', value: result.meta.z_score_20d != null ? (result.meta.z_score_20d > 0 ? '+' : '') + result.meta.z_score_20d.toFixed(2) : '—', color: result.meta.z_score_20d < -1 ? 'var(--bull)' : result.meta.z_score_20d > 1 ? 'var(--bear)' : 'var(--text)' },
+                { label: 'Z-score 50d', value: result.meta.z_score_50d != null ? (result.meta.z_score_50d > 0 ? '+' : '') + result.meta.z_score_50d.toFixed(2) : '—', color: result.meta.z_score_50d < -1 ? 'var(--bull)' : result.meta.z_score_50d > 1 ? 'var(--bear)' : 'var(--text)' },
+                { label: 'Bollinger %B', value: result.meta.pct_b != null ? result.meta.pct_b.toFixed(2) : '—', color: result.meta.pct_b < 0.2 ? 'var(--bull)' : result.meta.pct_b > 0.8 ? 'var(--bear)' : 'var(--text)' },
+                { label: 'RSI (14)', value: result.meta.rsi ?? '—', color: result.meta.rsi < 35 ? 'var(--bull)' : result.meta.rsi > 65 ? 'var(--bear)' : 'var(--text)' },
+                { label: 'OU Half-life', value: result.meta.half_life_days != null ? `${result.meta.half_life_days}d` : 'n/a', color: 'var(--text)' },
+                { label: 'ADF p-value', value: result.meta.adf_pvalue != null ? result.meta.adf_pvalue.toFixed(3) : '—', color: result.meta.adf_stationary ? 'var(--bull)' : 'var(--muted)' },
+              ].map(s => (
+                <div key={s.label} style={{ flex: '1 1 80px', background: 'var(--surface2)', borderRadius: 8, padding: '8px 12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>{s.label}</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: s.color }}>{s.value}</div>
+                </div>
+              ))}
+            </div>
           )}
 
           {/* Annual return stats */}

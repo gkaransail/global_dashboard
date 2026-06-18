@@ -47,10 +47,13 @@ def get_summary():
 def get_picks(
     timeframe: str = Query("1w", description="'1w' for weekly picks, '1mo' for monthly"),
     limit: int = Query(20, ge=5, le=50),
+    evaluated_only: bool = Query(False),
 ):
     """Latest top-20 picks per feature with evaluation results where available."""
     init_db()
     picks = db.get_feature_picks(timeframe=timeframe, limit=limit)
+    if evaluated_only:
+        picks = [p for p in picks if p.get("evaluated")]
 
     by_feature: dict[str, dict[str, list]] = {}
     for pick in picks:

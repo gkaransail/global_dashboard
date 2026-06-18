@@ -12,6 +12,7 @@ The existing evaluator grades them once evaluate_after passes.
 import logging
 from datetime import datetime, timedelta, timezone
 
+import yfinance as yf
 from features.backtest import db
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,14 @@ def run_scan(timeframe: str = "weekly") -> dict:
             continue
 
         picks = result.get("bullish", []) + result.get("bearish", [])
+        # Pre-fetch spots for any pick missing a price (institutional returns None)
+        missing_spot = [p["ticker"] for p in picks if not p.get("spot")]
+        spot_cache: dict[str, float] = {}
+        for ticker in missing_spot:
+            try:
+                spot_cache[ticker] = float(yf.Ticker(ticker).fast_info.last_price or 0)
+            except Exception:
+                spot_cache[ticker] = 0.0
 
         for pick in picks:
             ticker = pick.get("ticker")
@@ -72,6 +81,8 @@ def run_scan(timeframe: str = "weekly") -> dict:
                 skipped += 1
                 continue
 
+            spot = pick.get("spot") or spot_cache.get(ticker, 0.0)
+
             try:
                 db.insert_prediction({
                     "ticker":            ticker,
@@ -79,7 +90,7 @@ def run_scan(timeframe: str = "weekly") -> dict:
                     "predicted_at":      now.isoformat(),
                     "direction":         pick["direction"],
                     "score":             pick.get("score"),
-                    "spot_at_prediction": pick.get("spot") or 0,
+                    "spot_at_prediction": spot,
                     "evaluate_after":    eval_after,
                     "source":            source_tag,
                     "feature":           feature_name,

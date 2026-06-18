@@ -178,6 +178,17 @@ export const FEATURES = [
     ],
   },
   {
+    id: 'quant',
+    label: 'Quant Workbench',
+    icon: '🧮',
+    status: 'live',
+    section: 'ai',
+    description: 'Apply quantitative models (regime detection, momentum, mean reversion) to any stock.',
+    subOptions: [
+      { id: 'analyze', label: '🧮 Model Workbench', icon: '🧮', path: '/quant' },
+    ],
+  },
+  {
     id: 'leaderboard',
     label: 'Signal Leaderboard',
     icon: '🏆',

@@ -108,8 +108,14 @@ class MeanReversionModel(QuantModel):
         half_life = _ou_half_life(log_px)
         hl_finite = half_life < 252   # within 1 trading year
 
-        # ── 6. ADF stationarity test on log-prices ────────────────────────────
-        adf_result = adfuller(log_px.dropna(), autolag="AIC")
+        # ── 6. ADF stationarity test on detrended residuals ──────────────────
+        # Running ADF on raw log-prices almost always fails (they are I(1));
+        # instead detrend by regressing log_px on a linear time index, then
+        # test residuals — this captures mean-reversion around a trend.
+        t_idx = np.arange(len(log_px))
+        trend_fit = OLS(log_px.values, add_constant(t_idx)).fit()
+        detrended = pd.Series(trend_fit.resid, index=log_px.index)
+        adf_result = adfuller(detrended.dropna(), autolag="AIC")
         adf_stat, adf_pval = float(adf_result[0]), float(adf_result[1])
         adf_reject = adf_pval < 0.05   # reject unit root → stationary / mean-reverting
 
@@ -164,7 +170,7 @@ class MeanReversionModel(QuantModel):
             f"Bollinger %B: {pct_b:.2f}  (0=lower band, 1=upper band)",
             f"RSI (14): {rsi}  {'— oversold' if rsi < 35 else '— overbought' if rsi > 65 else ''}",
             f"OU half-life: {f'{half_life:.1f} trading days' if hl_finite else 'no mean reversion detected'}",
-            f"ADF test: p={adf_pval:.3f} — {'✓ stationary (mean-reverting)' if adf_reject else '✗ unit root — series not stationary'}",
+            f"ADF test (detrended): p={adf_pval:.3f} — {'✓ stationary (mean-reverting around trend)' if adf_reject else '✗ unit root — not mean-reverting'}",
             f"Bollinger band width: {band_width:.1f}% of price  {'(compressed — breakout risk)' if band_width < 5 else ''}",
         ]
         if z20 * z50 < 0:

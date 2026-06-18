@@ -1,13 +1,33 @@
 """
-Quant Model Workbench API.
+Quant Model Workbench API — with 30-min in-memory result cache.
 """
 import logging
+from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query
 from features.quant.registry import REGISTRY, list_models
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# ── In-memory TTL cache ───────────────────────────────────────────────────────
+_CACHE: dict[tuple, tuple] = {}  # (ticker, model_id) → (result_dict, expiry)
+_TTL = timedelta(minutes=30)
+
+
+def _cache_get(ticker: str, model_id: str):
+    key = (ticker, model_id)
+    entry = _CACHE.get(key)
+    if entry and datetime.utcnow() < entry[1]:
+        return entry[0]
+    _CACHE.pop(key, None)
+    return None
+
+
+def _cache_set(ticker: str, model_id: str, result: dict):
+    _CACHE[(ticker, model_id)] = (result, datetime.utcnow() + _TTL)
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("/models")
 def get_models():
@@ -18,11 +38,11 @@ def get_models():
 @router.get("/analyze/{ticker}")
 def analyze(
     ticker: str,
-    models: str = Query(..., description="Comma-separated model IDs, e.g. 'regime_detection'"),
+    models: str = Query(..., description="Comma-separated model IDs"),
 ):
     """
     Run one or more quant models on a ticker.
-    Returns a result card per model.
+    Results are cached per (ticker, model_id) for 30 minutes.
     """
     ticker = ticker.upper().strip()
     model_ids = [m.strip() for m in models.split(",") if m.strip()]
@@ -36,9 +56,15 @@ def analyze(
 
     results = []
     for mid in model_ids:
+        cached = _cache_get(ticker, mid)
+        if cached:
+            results.append(cached)
+            continue
         try:
             result = REGISTRY[mid].analyze(ticker)
-            results.append(result.to_dict())
+            d = result.to_dict()
+            _cache_set(ticker, mid, d)
+            results.append(d)
         except Exception as e:
             logger.error(f"Quant model {mid} failed for {ticker}: {e}")
             results.append({
@@ -49,3 +75,10 @@ def analyze(
             })
 
     return {"ticker": ticker, "results": results}
+
+
+@router.delete("/cache")
+def clear_cache():
+    """Clear the result cache (useful during development)."""
+    _CACHE.clear()
+    return {"cleared": True}

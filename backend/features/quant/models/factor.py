@@ -192,10 +192,12 @@ class FactorModel(QuantModel):
             f"Net factor contribution over last 63 days: {total_factor_contribution:+.1f}% annualised."
         )
 
-        # ── 12. Rolling alpha chart (63d window) ──────────────────────────────
+        # ── 12. Rolling alpha (strided — 30 windows max instead of ~400) ────────
         roll_alpha = []
-        win = 63
-        for i in range(win, len(combined)):
+        win    = 63
+        n_pts  = len(combined) - win
+        stride = max(1, n_pts // 30)   # at most 30 points → fast
+        for i in range(win, len(combined), stride):
             window_y = combined.iloc[i - win:i, 0]
             window_X = combined.iloc[i - win:i, 1:]
             try:
@@ -215,19 +217,12 @@ class FactorModel(QuantModel):
             for f in FACTORS
         ]
 
-        # Cumulative actual vs factor-explained return (last 252d)
-        X_recent = add_constant(X_clean.iloc[-252:])
-        fitted   = X_recent @ result.params
-        actual_cum  = (y_clean.iloc[-252:]).cumsum() * 100
-        fitted_cum  = fitted.cumsum() * 100
-        cum_series  = [
-            {"date": d, "actual": round(float(a), 2), "fitted": round(float(fi), 2)}
-            for d, a, fi in zip(
-                y_clean.index[-252:].strftime("%Y-%m-%d"),
-                actual_cum.values,
-                fitted_cum.values,
-            )
-        ]
+        # Alpha percentile bar: where does this alpha rank vs rolling history?
+        if roll_alpha:
+            all_alphas = [pt["alpha"] for pt in roll_alpha]
+            alpha_pct  = round(float(np.mean([a < alpha_annual for a in all_alphas])) * 100, 1)
+        else:
+            alpha_pct = 50.0
 
         return QuantResult(
             ticker     = ticker.upper(),
@@ -239,9 +234,9 @@ class FactorModel(QuantModel):
             summary    = summary,
             signals    = signals,
             chart_data = {
-                "factor_bars":  factor_bars,
-                "roll_alpha":   roll_alpha[-120:],   # last ~6 months of rolling alpha
-                "cum_series":   cum_series,
+                "factor_bars":   factor_bars,
+                "roll_alpha":    roll_alpha,
+                "alpha_pct":     alpha_pct,   # replaces cum_series
             },
             meta = {
                 "alpha_annual":    alpha_annual,

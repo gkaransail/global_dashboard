@@ -189,7 +189,10 @@ class VolatilityRegimeModel(QuantModel):
             f"VIX: {current_vix:.1f} ({vix_regime}) — {vix_pct:.0f}th percentile vs 1y",
             f"VIX trend: {'↑ rising vs 1M ago ({:.1f})'.format(vix_1m_ago) if vix_trending_up else '↓ falling vs 1M ago ({:.1f})'.format(vix_1m_ago)}",
             f"Realized vol — 10d: {rv10:.1f}%  21d: {rv21:.1f}%  63d: {rv63:.1f}% (annualised)",
-            f"Parkinson vol (21d): {park_vol:.1f}%  |  EWMA vol: {ewma_vol:.1f}%",
+            f"Alt vol estimator: {'Parkinson' if abs(park_vol - rv21) >= abs(ewma_vol - rv21) else 'EWMA'} "
+            f"{park_vol:.1f}% vs close-to-close {rv21:.1f}% "
+            f"({'higher — gaps/ranges elevated' if max(park_vol, ewma_vol) > rv21 else 'lower — calm intraday'})  "
+            f"[Parkinson: {park_vol:.1f}%  EWMA: {ewma_vol:.1f}%]",
             f"Vol term structure: {vol_term_structure} (10d {'>' if vol_expanding else '<'} 21d {'>' if vol_accelerating else '<'} 63d)",
             f"ATR %price: {current_atr_pct:.2f}% — {atr_percentile:.0f}th percentile vs 1y",
             f"Composite vol score: {vol_composite}/100 ({'low risk' if vol_composite < 35 else 'elevated risk' if vol_composite > 60 else 'moderate'})",

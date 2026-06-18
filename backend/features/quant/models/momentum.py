@@ -1,16 +1,14 @@
 """
 Momentum / Trend-Following model.
 
-Five lenses that together answer: "is this stock in a strong, persistent trend?":
+Three scored buckets that together answer: "is this stock in a strong, persistent trend?":
 
-  1. Price momentum    — raw returns over 1M / 3M / 6M / 12M lookbacks
-  2. Relative strength — 3M and 6M returns vs SPY benchmark
-  3. Moving averages   — price vs EMA20/50/200, golden/death cross
-  4. MACD             — 12/26/9 momentum oscillator
-  5. ADX              — 14-day directional trend strength
+  1. Returns bucket  (40%)  — raw price momentum over 1M/3M/6M/12M lookbacks
+  2. Rel. strength   (35%)  — 3M and 6M returns vs SPY benchmark
+  3. Technical       (25%)  — EMA position stack, MACD crossover, ADX, golden/death cross
 
-Scoring: each sub-signal votes +1 (bull) / -1 (bear). The net vote determines
-direction; ADX gates confidence (weak trend = lower confidence regardless of votes).
+Each bucket scores from -1 to +1. Weighted average determines direction.
+ADX gates confidence — weak ADX penalises regardless of vote result.
 """
 import logging
 import warnings
@@ -29,35 +27,30 @@ def _ema(series: pd.Series, span: int) -> pd.Series:
 
 
 def _macd(close: pd.Series):
-    fast  = _ema(close, 12)
-    slow  = _ema(close, 26)
-    line  = fast - slow
+    fast   = _ema(close, 12)
+    slow   = _ema(close, 26)
+    line   = fast - slow
     signal = _ema(line, 9)
-    hist  = line - signal
-    return float(line.iloc[-1]), float(signal.iloc[-1]), float(hist.iloc[-1])
+    return float(line.iloc[-1]), float(signal.iloc[-1])
 
 
-def _adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> float:
-    """Average Directional Index — measures trend strength (not direction)."""
+def _adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14):
     tr   = pd.concat([high - low,
                       (high - close.shift(1)).abs(),
                       (low  - close.shift(1)).abs()], axis=1).max(axis=1)
     atr  = tr.ewm(span=period, adjust=False).mean()
-
     up   = high.diff()
     down = -low.diff()
     dm_plus  = up.where((up > down) & (up > 0), 0)
     dm_minus = down.where((down > up) & (down > 0), 0)
-
     di_plus  = 100 * dm_plus.ewm(span=period, adjust=False).mean() / atr.replace(0, np.nan)
     di_minus = 100 * dm_minus.ewm(span=period, adjust=False).mean() / atr.replace(0, np.nan)
-
-    dx  = (100 * (di_plus - di_minus).abs() / (di_plus + di_minus).replace(0, np.nan))
+    dx  = 100 * (di_plus - di_minus).abs() / (di_plus + di_minus).replace(0, np.nan)
     adx = dx.ewm(span=period, adjust=False).mean()
     return round(float(adx.iloc[-1]), 1), round(float(di_plus.iloc[-1]), 1), round(float(di_minus.iloc[-1]), 1)
 
 
-def _return_n_days(close: pd.Series, n: int) -> float | None:
+def _return_n(close: pd.Series, n: int):
     if len(close) < n + 1:
         return None
     return round(float((close.iloc[-1] / close.iloc[-(n + 1)] - 1) * 100), 2)
@@ -67,13 +60,13 @@ class MomentumModel(QuantModel):
     id          = "momentum"
     name        = "Momentum / Trend"
     description = (
-        "Multi-timeframe price momentum, relative strength vs SPY, "
-        "EMA crossovers, MACD, and ADX trend strength."
+        "Three scored buckets: raw returns (1M–12M), relative strength vs SPY, "
+        "and technical indicators (EMA stack, MACD, ADX, golden cross)."
     )
     category    = "momentum"
 
     def analyze(self, ticker: str) -> QuantResult:
-        # ── 1. Fetch price data (ticker + SPY for relative strength) ─────────
+        # ── 1. Fetch price data ───────────────────────────────────────────────
         t      = yf.Ticker(ticker)
         spy    = yf.Ticker("SPY")
         hist   = t.history(period="18mo")
@@ -82,28 +75,50 @@ class MomentumModel(QuantModel):
         if len(hist) < 60:
             raise ValueError(f"Insufficient price history for {ticker}")
 
-        close  = hist["Close"]
-        high   = hist["High"]
-        low    = hist["Low"]
+        close = hist["Close"]
+        high  = hist["High"]
+        low   = hist["Low"]
 
-        # ── 2. Price momentum (raw returns) ──────────────────────────────────
-        ret_1m  = _return_n_days(close, 21)
-        ret_3m  = _return_n_days(close, 63)
-        ret_6m  = _return_n_days(close, 126)
-        ret_12m = _return_n_days(close, 252)
+        # ── 2. Bucket 1: Returns (40%) ────────────────────────────────────────
+        ret_1m  = _return_n(close, 21)
+        ret_3m  = _return_n(close, 63)
+        ret_6m  = _return_n(close, 126)
+        ret_12m = _return_n(close, 252)
 
-        # ── 3. Relative strength vs SPY ───────────────────────────────────────
+        ret_votes = []
+        ret_detail = []
+        for ret, label, w in [(ret_1m, "1M", 1), (ret_3m, "3M", 2),
+                               (ret_6m, "6M", 2), (ret_12m, "12M", 1)]:
+            if ret is not None:
+                sign = 1 if ret > 0 else -1
+                ret_votes.extend([sign] * w)
+                pfx = "+" if ret > 0 else ""
+                ret_detail.append(f"{label}: {pfx}{ret}%")
+
+        bucket_returns = (sum(ret_votes) / len(ret_votes)) if ret_votes else 0.0
+
+        # ── 3. Bucket 2: Relative strength vs SPY (35%) ──────────────────────
         def rel_strength(n):
             if len(s_hist) < n + 1 or len(close) < n + 1:
                 return None
-            tkr_ret = (close.iloc[-1] / close.iloc[-(n+1)] - 1) * 100
-            spy_ret = (s_hist["Close"].iloc[-1] / s_hist["Close"].iloc[-(n+1)] - 1) * 100
-            return round(float(tkr_ret - spy_ret), 2)
+            tkr_r = (close.iloc[-1] / close.iloc[-(n+1)] - 1) * 100
+            spy_r = (s_hist["Close"].iloc[-1] / s_hist["Close"].iloc[-(n+1)] - 1) * 100
+            return round(float(tkr_r - spy_r), 2)
 
         rs_3m = rel_strength(63)
         rs_6m = rel_strength(126)
 
-        # ── 4. Moving averages ────────────────────────────────────────────────
+        rs_votes = []
+        rs_detail = []
+        for rs, label in [(rs_3m, "3M"), (rs_6m, "6M")]:
+            if rs is not None:
+                rs_votes.append(1 if rs > 0 else -1)
+                pfx = "+" if rs > 0 else ""
+                rs_detail.append(f"{label} vs SPY: {pfx}{rs}%")
+
+        bucket_rs = (sum(rs_votes) / len(rs_votes)) if rs_votes else 0.0
+
+        # ── 4. Bucket 3: Technical indicators (25%) ───────────────────────────
         ema20  = _ema(close, 20)
         ema50  = _ema(close, 50)
         ema200 = _ema(close, 200)
@@ -111,62 +126,52 @@ class MomentumModel(QuantModel):
         price      = float(close.iloc[-1])
         e20        = float(ema20.iloc[-1])
         e50        = float(ema50.iloc[-1])
-        e200       = float(ema200.iloc[-1] if len(close) >= 200 else np.nan)
-        golden_x   = float(ema50.iloc[-1]) > float(ema200.iloc[-1]) if len(close) >= 200 else None
-        prev_cross = (float(ema50.iloc[-2]) <= float(ema200.iloc[-2])) if golden_x is not None and len(close) >= 201 else None
-        fresh_cross = golden_x is not None and prev_cross is not None and (golden_x != (not prev_cross))
+        e200       = float(ema200.iloc[-1]) if len(close) >= 200 else None
+        golden_x   = (e50 > e200) if e200 is not None else None
 
         above_ema20  = price > e20
         above_ema50  = price > e50
-        above_ema200 = price > e200 if not np.isnan(e200) else None
+        above_ema200 = (price > e200) if e200 is not None else None
 
-        # ── 5. MACD ───────────────────────────────────────────────────────────
-        macd_line, macd_sig, macd_hist = _macd(close)
+        macd_line, macd_sig = _macd(close)
         macd_bull = macd_line > macd_sig
 
-        # ── 6. ADX ────────────────────────────────────────────────────────────
         adx, di_plus, di_minus = _adx(high, low, close)
-        trending   = adx > 20
-        strong_trend = adx > 30
+        trending      = adx > 20
+        strong_trend  = adx > 30
 
-        # ── 7. 52-week position ───────────────────────────────────────────────
-        lookback   = close.iloc[-252:] if len(close) >= 252 else close
-        hi52       = float(lookback.max())
-        lo52       = float(lookback.min())
-        pos52      = round((price - lo52) / (hi52 - lo52) * 100, 1) if hi52 != lo52 else 50.0
+        tech_votes = []
+        tech_detail = []
 
-        # ── 8. Vote scoring ───────────────────────────────────────────────────
-        votes = []
-        reasons = []
-
-        def vote(cond, bull_msg, bear_msg, weight=1):
+        for cond, bull_msg, bear_msg, w in [
+            (above_ema20,  "Above EMA20",            "Below EMA20",           1),
+            (above_ema50,  "Above EMA50",             "Below EMA50",           2),
+            (above_ema200, "Above EMA200 (bull mkt)", "Below EMA200 (bear mkt)", 2),
+            (golden_x,     "EMA50>EMA200 (golden)",   "EMA50<EMA200 (death)",  2),
+            (macd_bull,    f"MACD above signal",       "MACD below signal",     1),
+            (di_plus > di_minus, f"+DI>{di_minus:.0f}", f"-DI>{di_plus:.0f}",  1),
+        ]:
             if cond is None:
-                return
-            if cond:
-                votes.append(weight)
-                reasons.append((1, bull_msg))
-            else:
-                votes.append(-weight)
-                reasons.append((-1, bear_msg))
+                continue
+            sign = 1 if cond else -1
+            tech_votes.extend([sign] * w)
+            tech_detail.append(bull_msg if cond else bear_msg)
 
-        vote(ret_1m and ret_1m > 0,       f"1M return: +{ret_1m}%",      f"1M return: {ret_1m}%")
-        vote(ret_3m and ret_3m > 0,       f"3M return: +{ret_3m}%",      f"3M return: {ret_3m}%", weight=2)
-        vote(ret_6m and ret_6m > 0,       f"6M return: +{ret_6m}%",      f"6M return: {ret_6m}%", weight=2)
-        vote(ret_12m and ret_12m > 0,     f"12M return: +{ret_12m}%",    f"12M return: {ret_12m}%")
-        vote(rs_3m and rs_3m > 0,         f"3M alpha vs SPY: +{rs_3m}%", f"3M lag vs SPY: {rs_3m}%", weight=2)
-        vote(rs_6m and rs_6m > 0,         f"6M alpha vs SPY: +{rs_6m}%", f"6M lag vs SPY: {rs_6m}%", weight=2)
-        vote(above_ema20,                 "Price above EMA20",            "Price below EMA20")
-        vote(above_ema50,                 "Price above EMA50",            "Price below EMA50", weight=2)
-        vote(above_ema200,                "Price above EMA200 (bull mkt)","Price below EMA200 (bear mkt)", weight=2)
-        vote(golden_x,                    "EMA50 > EMA200 (golden cross)", "EMA50 < EMA200 (death cross)", weight=2)
-        vote(macd_bull,                   f"MACD above signal ({macd_line:+.2f})", f"MACD below signal ({macd_line:+.2f})")
-        vote(di_plus > di_minus,          f"+DI {di_plus:.0f} > -DI {di_minus:.0f}", f"+DI {di_plus:.0f} < -DI {di_minus:.0f}")
+        bucket_tech = (sum(tech_votes) / len(tech_votes)) if tech_votes else 0.0
 
-        net   = sum(votes)
-        total = sum(abs(v) for v in votes)
-        score = net / total if total else 0   # -1 to +1
+        # Fresh golden/death cross is a notable event
+        prev_golden = None
+        if len(close) >= 201 and e200 is not None:
+            e50_prev  = float(ema50.iloc[-2])
+            e200_prev = float(ema200.iloc[-2])
+            prev_golden = e50_prev > e200_prev
+        fresh_cross = (golden_x is not None and prev_golden is not None
+                       and golden_x != prev_golden)
 
-        # ── 9. Direction ──────────────────────────────────────────────────────
+        # ── 5. Composite score ────────────────────────────────────────────────
+        score = (0.40 * bucket_returns + 0.35 * bucket_rs + 0.25 * bucket_tech)
+
+        # ── 6. Direction ──────────────────────────────────────────────────────
         if score > 0.15:
             direction = 1
         elif score < -0.15:
@@ -174,23 +179,20 @@ class MomentumModel(QuantModel):
         else:
             direction = 0
 
-        # ── 10. Confidence ────────────────────────────────────────────────────
-        # Base: |score| mapped to 0-70
-        base_conf  = abs(score) * 70
-
-        # ADX modifier: strong trend boosts confidence
+        # ── 7. Confidence ─────────────────────────────────────────────────────
+        base_conf = abs(score) * 70
         if strong_trend:
             adx_mod = 25
         elif trending:
             adx_mod = 12
         else:
-            adx_mod = -10   # weak trend hurts momentum signals
+            adx_mod = -10
 
         confidence = round(max(15.0, min(93.0, base_conf + adx_mod)), 1)
         if direction == 0:
             confidence = min(confidence, 35.0)
 
-        # ── 11. Regime label ──────────────────────────────────────────────────
+        # ── 8. Regime label ───────────────────────────────────────────────────
         trend_str = "Strong" if strong_trend else "Moderate" if trending else "Weak"
         if direction == 1:
             regime = f"Uptrend — {trend_str} ({adx:.0f} ADX)"
@@ -199,49 +201,49 @@ class MomentumModel(QuantModel):
         else:
             regime = f"No Clear Trend ({adx:.0f} ADX)"
 
-        # ── 12. Signals (top 6 most informative) ─────────────────────────────
-        bull_reasons = [r[1] for r in reasons if r[0] == 1]
-        bear_reasons = [r[1] for r in reasons if r[0] == -1]
+        # ── 9. 52-week position ───────────────────────────────────────────────
+        lookback = close.iloc[-252:] if len(close) >= 252 else close
+        hi52     = float(lookback.max())
+        lo52     = float(lookback.min())
+        pos52    = round((price - lo52) / (hi52 - lo52) * 100, 1) if hi52 != lo52 else 50.0
 
-        signals = []
-        if direction == 1:
-            signals = bull_reasons[:4] + bear_reasons[:2]
-        elif direction == -1:
-            signals = bear_reasons[:4] + bull_reasons[:2]
-        else:
-            signals = bull_reasons[:3] + bear_reasons[:3]
-
-        signals.append(f"ADX: {adx:.0f} — {'strong trend' if strong_trend else 'trending' if trending else 'no trend / choppy'}")
-        signals.append(f"52-week position: {pos52:.0f}% (100=52w high, 0=52w low)")
+        # ── 10. Signals ───────────────────────────────────────────────────────
+        signals = [
+            f"Returns bucket ({bucket_returns:+.2f}): {' | '.join(ret_detail) or 'n/a'}",
+            f"Rel. strength bucket ({bucket_rs:+.2f}): {' | '.join(rs_detail) or 'n/a'}",
+            f"Technical bucket ({bucket_tech:+.2f}): {', '.join(tech_detail[:3]) or 'n/a'}",
+            f"Composite score: {score:+.2f} → {regime}",
+            f"ADX: {adx:.0f} — {'strong trend' if strong_trend else 'trending' if trending else 'choppy / no trend'}",
+            f"52-week position: {pos52:.0f}%  (100 = 52w high, 0 = 52w low)",
+        ]
         if fresh_cross:
-            cross_type = "🟢 Fresh Golden Cross" if golden_x else "🔴 Fresh Death Cross"
+            cross_type = "Fresh Golden Cross (EMA50 crossed above EMA200)" if golden_x \
+                         else "Fresh Death Cross (EMA50 crossed below EMA200)"
             signals.insert(0, cross_type)
 
-        # ── 13. Summary ───────────────────────────────────────────────────────
-        bull_ct = sum(1 for r in reasons if r[0] == 1)
-        bear_ct = sum(1 for r in reasons if r[0] == -1)
+        # ── 11. Summary ───────────────────────────────────────────────────────
         ret_str = f"+{ret_3m}%" if ret_3m and ret_3m > 0 else f"{ret_3m}%"
-
+        rs_str  = f"{rs_3m:+.1f}%" if rs_3m is not None else "n/a"
         if direction == 1:
             summary = (
-                f"{ticker} shows bullish momentum: {bull_ct}/{bull_ct+bear_ct} signals agree. "
-                f"3M return {ret_str}, {'+' if rs_3m and rs_3m>0 else ''}{rs_3m}% vs SPY. "
+                f"{ticker} has bullish momentum (score {score:+.2f}). "
+                f"3M return {ret_str}, {rs_str} vs SPY. "
                 f"ADX {adx:.0f} — {'strong persistent trend' if strong_trend else 'moderate trend — watch for fade'}."
             )
         elif direction == -1:
             summary = (
-                f"{ticker} shows bearish momentum: {bear_ct}/{bull_ct+bear_ct} signals negative. "
-                f"3M return {ret_str}, {rs_3m}% vs SPY. "
-                f"ADX {adx:.0f} — {'strong downtrend' if strong_trend else 'moderate selling — not yet capitulation'}."
+                f"{ticker} has bearish momentum (score {score:+.2f}). "
+                f"3M return {ret_str}, {rs_str} vs SPY. "
+                f"ADX {adx:.0f} — {'strong downtrend' if strong_trend else 'moderate selling pressure'}."
             )
         else:
             summary = (
                 f"{ticker} has no clear directional momentum (score {score:+.2f}). "
-                f"{bull_ct} bullish vs {bear_ct} bearish signals — market is indecisive. "
+                f"Returns, relative strength, and technical signals are mixed. "
                 f"ADX {adx:.0f} confirms {'choppy, non-trending conditions' if not trending else 'weak trend'}."
             )
 
-        # ── 14. Chart data ────────────────────────────────────────────────────
+        # ── 12. Chart data ────────────────────────────────────────────────────
         price_series = [
             {
                 "date":   d,
@@ -259,25 +261,26 @@ class MomentumModel(QuantModel):
             )
         ]
 
-        # MACD series
         fast_s   = _ema(close, 12)
         slow_s   = _ema(close, 26)
         macd_s   = fast_s - slow_s
         signal_s = _ema(macd_s, 9)
         hist_s   = macd_s - signal_s
         macd_series = [
-            {
-                "date":    d,
-                "macd":    round(float(m), 3),
-                "signal":  round(float(sig), 3),
-                "hist":    round(float(h), 3),
-            }
+            {"date": d, "macd": round(float(m), 3), "signal": round(float(sig), 3), "hist": round(float(h), 3)}
             for d, m, sig, h in zip(
                 close.index.strftime("%Y-%m-%d").tolist()[-120:],
                 macd_s.values[-120:],
                 signal_s.values[-120:],
                 hist_s.values[-120:],
             )
+        ]
+
+        # Bucket bar chart data
+        bucket_bars = [
+            {"bucket": "Returns (40%)",    "score": round(bucket_returns, 3)},
+            {"bucket": "Rel. Strength (35%)", "score": round(bucket_rs, 3)},
+            {"bucket": "Technical (25%)",  "score": round(bucket_tech, 3)},
         ]
 
         return QuantResult(
@@ -290,13 +293,15 @@ class MomentumModel(QuantModel):
             summary    = summary,
             signals    = signals,
             chart_data = {
-                "price_series": price_series,
-                "macd_series":  macd_series,
+                "price_series":  price_series,
+                "macd_series":   macd_series,
+                "bucket_bars":   bucket_bars,
             },
             meta = {
                 "score":          round(score, 3),
-                "bull_votes":     bull_ct,
-                "bear_votes":     bear_ct,
+                "bucket_returns": round(bucket_returns, 3),
+                "bucket_rs":      round(bucket_rs, 3),
+                "bucket_tech":    round(bucket_tech, 3),
                 "ret_1m":         ret_1m,
                 "ret_3m":         ret_3m,
                 "ret_6m":         ret_6m,

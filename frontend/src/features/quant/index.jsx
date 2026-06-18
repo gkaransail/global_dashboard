@@ -14,11 +14,15 @@ function pctColor(v) {
 }
 
 const CATEGORY_COLOR = {
-  regime:     '#a78bfa',
-  momentum:   '#38bdf8',
-  reversion:  '#fbbf24',
-  factor:     '#4ade80',
-  volatility: '#f87171',
+  regime:      '#a78bfa',
+  momentum:    '#38bdf8',
+  reversion:   '#fbbf24',
+  factor:      '#4ade80',
+  volatility:  '#f87171',
+  fundamental: '#fb923c',
+  sentiment:   '#e879f9',
+  options:     '#22d3ee',
+  ensemble:    '#f0abfc',
 }
 
 const DIRECTION_LABEL = { 1: '▲ Bullish', '-1': '▼ Bearish', 0: '◆ Neutral' }
@@ -57,31 +61,27 @@ function RegimeChart({ chartData }) {
         {last.map((d, i) => {
           const x = (i / last.length) * W
           const w = W / last.length + 1
-          const isBull = d.value === 1
-          return (
-            <rect key={i} x={x} y={0} width={w} height={H}
-              fill={isBull ? '#4ade8022' : '#f8717122'} />
-          )
+          const fill = d.value === 1 ? '#4ade8022' : d.value === -1 ? '#f8717122' : '#fbbf2418'
+          return <rect key={i} x={x} y={0} width={w} height={H} fill={fill} />
         })}
         {/* Regime boundary line */}
         {last.map((d, i) => {
           if (i === 0) return null
-          const prev = last[i - 1]
-          if (prev.value === d.value) return null
+          if (last[i - 1].value === d.value) return null
           const x = (i / last.length) * W
           return <line key={`l${i}`} x1={x} y1={0} x2={x} y2={H} stroke="var(--border)" strokeWidth={1} strokeDasharray="2,2" />
         })}
-        {/* Bull / Bear labels at end */}
         {(() => {
-          const last1 = last[last.length - 1]
-          const color = last1?.value === 1 ? '#4ade80' : '#f87171'
-          const label = last1?.value === 1 ? 'BULL' : 'BEAR'
+          const cur = last[last.length - 1]
+          const color = cur?.value === 1 ? '#4ade80' : cur?.value === -1 ? '#f87171' : '#fbbf24'
+          const label = cur?.value === 1 ? 'BULL' : cur?.value === -1 ? 'BEAR' : 'SIDE'
           return <text x={W - 4} y={H / 2 + 4} fontSize={9} fill={color} textAnchor="end" fontWeight="700">{label}</text>
         })()}
       </svg>
       <div style={{ display: 'flex', gap: 12, marginTop: 4, fontSize: 11, color: 'var(--muted)' }}>
-        <span style={{ color: '#4ade80' }}>■ Bull regime</span>
-        <span style={{ color: '#f87171' }}>■ Bear regime</span>
+        <span style={{ color: '#4ade80' }}>■ Bull</span>
+        <span style={{ color: '#fbbf24' }}>■ Sideways</span>
+        <span style={{ color: '#f87171' }}>■ Bear</span>
       </div>
     </div>
   )
@@ -387,39 +387,243 @@ function RollingAlphaChart({ chartData }) {
   )
 }
 
-// ── Actual vs fitted return chart ─────────────────────────────────────────────
+// ── Alpha Percentile Bar (replaces CumReturnChart in factor model) ────────────
 
-function CumReturnChart({ chartData }) {
-  const series = chartData?.cum_series ?? []
-  if (series.length < 10) return null
-
-  const W = 560, H = 80
-  const allVals = series.flatMap(d => [d.actual, d.fitted])
-  const minV = Math.min(...allVals) - 1
-  const maxV = Math.max(...allVals) + 1
-  const sy = v => H - ((v - minV) / (maxV - minV)) * H
-  const sx = i => (i / (series.length - 1)) * W
-  const zeroY = sy(0)
-
-  const actualPts  = series.map((d, i) => `${sx(i)},${sy(d.actual)}`).join(' ')
-  const fittedPts  = series.map((d, i) => `${sx(i)},${sy(d.fitted)}`).join(' ')
-
+function AlphaPercentileBar({ chartData, meta }) {
+  const pct = chartData?.alpha_pct ?? 50
+  const alpha = meta?.alpha_annual ?? 0
+  const color = pct >= 70 ? 'var(--bull)' : pct <= 30 ? 'var(--bear)' : '#fbbf24'
   return (
     <div style={{ marginTop: 14 }}>
-      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>Actual vs Factor-Explained Return (cumulative, 1 year)</div>
-      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
-        style={{ display: 'block', borderRadius: 6, background: 'var(--surface2)' }}>
-        {zeroY > 0 && zeroY < H && (
-          <line x1={0} y1={zeroY} x2={W} y2={zeroY} stroke="#ffffff15" strokeWidth={1} strokeDasharray="3,3" />
-        )}
-        <polyline points={fittedPts} fill="none" stroke="#fbbf2488" strokeWidth={1.2} strokeDasharray="4,2" />
-        <polyline points={actualPts} fill="none" stroke="var(--accent)" strokeWidth={1.5} />
-        <circle cx={sx(series.length-1)} cy={sy(series[series.length-1].actual)} r={3} fill="var(--accent)" />
-      </svg>
-      <div style={{ display: 'flex', gap: 16, marginTop: 4, fontSize: 11 }}>
-        <span style={{ color: 'var(--accent)' }}>— Actual excess return</span>
-        <span style={{ color: '#fbbf24' }}>--- Factor-explained</span>
-        <span style={{ color: 'var(--muted)', marginLeft: 'auto', fontSize: 10 }}>Gap = alpha</span>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+        Alpha Percentile vs Rolling History
+      </div>
+      <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '12px 14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+          <span style={{ fontSize: 12, color: 'var(--muted)', flex: 1 }}>
+            Current α {alpha > 0 ? '+' : ''}{alpha}% p.a. ranks at
+          </span>
+          <span style={{ fontSize: 18, fontWeight: 800, color }}>{pct}th percentile</span>
+        </div>
+        <div style={{ height: 12, background: 'var(--surface)', borderRadius: 6, overflow: 'hidden', position: 'relative' }}>
+          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to right, var(--bear), #fbbf24 50%, var(--bull))' }} />
+          <div style={{
+            position: 'absolute', top: 0, bottom: 0, left: `${pct}%`,
+            width: 3, background: '#fff', borderRadius: 2, transform: 'translateX(-50%)',
+          }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 10, color: 'var(--muted)' }}>
+          <span>0th (worst alpha)</span>
+          <span>100th (best alpha)</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Momentum bucket bars ──────────────────────────────────────────────────────
+
+function BucketBars({ chartData }) {
+  const bars = chartData?.bucket_bars ?? []
+  if (!bars.length) return null
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>Bucket Scores (−1 bearish → +1 bullish)</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {bars.map(b => {
+          const pct = (Math.abs(b.score) / 1) * 50
+          const bull = b.score > 0
+          const color = bull ? 'var(--bull)' : b.score < 0 ? 'var(--bear)' : 'var(--muted)'
+          return (
+            <div key={b.bucket} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 11, color: 'var(--muted)', width: 160, flexShrink: 0 }}>{b.bucket}</span>
+              <div style={{ flex: 1, display: 'flex', height: 16, position: 'relative', background: 'var(--surface2)', borderRadius: 4 }}>
+                <div style={{
+                  position: 'absolute',
+                  left: bull ? '50%' : `${50 - pct}%`,
+                  width: `${pct}%`,
+                  height: '100%', background: color, borderRadius: 4,
+                }} />
+                <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: 'var(--border)' }} />
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 700, color, width: 48, textAlign: 'right', flexShrink: 0 }}>
+                {b.score > 0 ? '+' : ''}{b.score.toFixed(2)}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Fundamental pillar bars ───────────────────────────────────────────────────
+
+function PillarBars({ chartData }) {
+  const bars = chartData?.pillar_bars ?? []
+  if (!bars.length) return null
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>Pillar Scores (0–20 each)</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {bars.map(b => {
+          const pct = (b.score / b.max) * 100
+          const color = pct >= 65 ? 'var(--bull)' : pct >= 40 ? '#fbbf24' : 'var(--bear)'
+          return (
+            <div key={b.pillar} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 11, color: 'var(--muted)', width: 120, flexShrink: 0 }}>{b.pillar}</span>
+              <div style={{ flex: 1, height: 14, background: 'var(--surface2)', borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 4, transition: 'width .4s' }} />
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 700, color, width: 44, textAlign: 'right', flexShrink: 0 }}>
+                {b.score}/{b.max}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Sentiment article bars ────────────────────────────────────────────────────
+
+function SentimentBars({ chartData }) {
+  const bars = chartData?.article_bars ?? []
+  if (!bars.length) return null
+  const maxAbs = Math.max(...bars.map(b => Math.abs(b.compound)), 0.1)
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>Article Sentiment (FinBERT compound score)</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        {bars.map((b, i) => {
+          const pct = (Math.abs(b.compound) / maxAbs) * 45
+          const bull = b.compound > 0
+          const color = bull ? 'var(--bull)' : b.compound < 0 ? 'var(--bear)' : 'var(--muted)'
+          return (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1, display: 'flex', height: 14, position: 'relative', background: 'var(--surface2)', borderRadius: 4 }}>
+                <div style={{
+                  position: 'absolute',
+                  left: bull ? '50%' : `${50 - pct}%`,
+                  width: `${pct}%`, height: '100%', background: color, borderRadius: 4, opacity: 0.8,
+                }} />
+                <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: 'var(--border)' }} />
+              </div>
+              <span style={{ fontSize: 10, fontWeight: 700, color, width: 38, textAlign: 'right', flexShrink: 0 }}>
+                {b.compound > 0 ? '+' : ''}{b.compound.toFixed(2)}
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--muted)', width: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                {b.title}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Options flow bars ─────────────────────────────────────────────────────────
+
+function FlowBars({ chartData }) {
+  const bars = chartData?.flow_bars ?? []
+  if (!bars.length) return null
+  const maxPrem = Math.max(...bars.map(b => b.premium), 1)
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>Top Unusual Contracts (by premium)</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {bars.map((b, i) => {
+          const pct = (b.premium / maxPrem) * 100
+          const color = b.type === 'call' ? 'var(--bull)' : 'var(--bear)'
+          const fmtPrem = b.premium >= 1e6 ? `$${(b.premium / 1e6).toFixed(1)}M` : `$${(b.premium / 1e3).toFixed(0)}K`
+          return (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 10, color, width: 14, fontWeight: 800, flexShrink: 0 }}>{b.type === 'call' ? 'C' : 'P'}</span>
+              <span style={{ fontSize: 10, color: 'var(--muted)', width: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }}>{b.label}</span>
+              <div style={{ flex: 1, height: 12, background: 'var(--surface2)', borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 4, opacity: 0.7 }} />
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 700, color, width: 54, textAlign: 'right', flexShrink: 0 }}>{fmtPrem}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── IV skew bars ──────────────────────────────────────────────────────────────
+
+function SkewBars({ chartData }) {
+  const bars = chartData?.skew_bars ?? []
+  if (!bars.length) return null
+  const maxAbs = Math.max(...bars.map(b => Math.abs(b.skew || 0)), 0.05)
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>IV Skew by Expiry (+ = put skew = fear)</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {bars.map((b, i) => {
+          const pct = (Math.abs(b.skew || 0) / maxAbs) * 45
+          const bull = (b.skew || 0) < 0
+          const color = bull ? 'var(--bull)' : 'var(--bear)'
+          return (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 10, color: 'var(--muted)', width: 70, flexShrink: 0 }}>{b.expiration} ({b.dte}d)</span>
+              <div style={{ flex: 1, display: 'flex', height: 12, position: 'relative', background: 'var(--surface2)', borderRadius: 4 }}>
+                <div style={{
+                  position: 'absolute',
+                  left: bull ? `${50 - pct}%` : '50%',
+                  width: `${pct}%`, height: '100%', background: color, borderRadius: 4, opacity: 0.7,
+                }} />
+                <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: 'var(--border)' }} />
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 700, color, width: 48, textAlign: 'right', flexShrink: 0 }}>
+                {b.skew > 0 ? '+' : ''}{(b.skew || 0).toFixed(3)}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Ensemble vote bars ────────────────────────────────────────────────────────
+
+function EnsembleVotes({ chartData }) {
+  const bars = chartData?.vote_bars ?? []
+  if (!bars.length) return null
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>Model Votes (weighted contribution)</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {bars.map((b, i) => {
+          const maxAbs = Math.max(...bars.map(x => Math.abs(x.weighted)), 0.1)
+          const pct = (Math.abs(b.weighted) / maxAbs) * 45
+          const bull = b.weighted > 0
+          const color = bull ? 'var(--bull)' : b.weighted < 0 ? 'var(--bear)' : 'var(--muted)'
+          return (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 10, color: 'var(--muted)', width: 160, flexShrink: 0 }}>{b.model}</span>
+              <div style={{ flex: 1, display: 'flex', height: 14, position: 'relative', background: 'var(--surface2)', borderRadius: 4 }}>
+                <div style={{
+                  position: 'absolute',
+                  left: bull ? '50%' : `${50 - pct}%`,
+                  width: `${pct}%`, height: '100%', background: color, borderRadius: 4,
+                }} />
+                <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: 'var(--border)' }} />
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 700, color, width: 44, textAlign: 'right', flexShrink: 0 }}>
+                {b.weighted > 0 ? '+' : ''}{b.weighted.toFixed(3)}
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--muted)', width: 52, textAlign: 'right', flexShrink: 0 }}>
+                {b.confidence.toFixed(0)}% conf
+              </span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -513,27 +717,30 @@ function MACDChart({ chartData }) {
 
 function TransitionMatrix({ matrix }) {
   if (!matrix) return null
-  const cells = [
-    { label: 'Bull→Bull', value: matrix['Bull→Bull'], color: '#4ade80' },
-    { label: 'Bull→Bear', value: matrix['Bull→Bear'], color: '#f87171' },
-    { label: 'Bear→Bull', value: matrix['Bear→Bull'], color: '#4ade80' },
-    { label: 'Bear→Bear', value: matrix['Bear→Bear'], color: '#f87171' },
-  ]
+  const keys = Object.keys(matrix)
+  const is3state = keys.some(k => k.includes('Sideways'))
+  const stateColor = { Bull: '#4ade80', Sideways: '#fbbf24', Bear: '#f87171' }
+
   return (
     <div style={{ marginTop: 14 }}>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>Transition probabilities</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-        {cells.map(c => (
-          <div key={c.label} style={{
-            background: 'var(--surface2)', borderRadius: 6, padding: '8px 10px',
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          }}>
-            <span style={{ fontSize: 11, color: 'var(--muted)' }}>{c.label}</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: c.value > 70 ? c.color : 'var(--text)' }}>
-              {c.value}%
-            </span>
-          </div>
-        ))}
+      <div style={{ display: 'grid', gridTemplateColumns: is3state ? '1fr 1fr 1fr' : '1fr 1fr', gap: 6 }}>
+        {keys.map(key => {
+          const [from, to] = key.split('→')
+          const color = stateColor[to] || 'var(--text)'
+          const v = matrix[key]
+          return (
+            <div key={key} style={{
+              background: 'var(--surface2)', borderRadius: 6, padding: '8px 10px',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <span style={{ fontSize: 10, color: 'var(--muted)' }}>{key}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: v > 70 ? color : 'var(--text)' }}>
+                {v}%
+              </span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -642,6 +849,7 @@ function ResultCard({ result }) {
           )}
           {result.model_id === 'momentum' && result.chart_data && (
             <>
+              <BucketBars chartData={result.chart_data} />
               <EMAChart chartData={result.chart_data} />
               <MACDChart chartData={result.chart_data} />
             </>
@@ -656,8 +864,23 @@ function ResultCard({ result }) {
             <>
               <FactorBars chartData={result.chart_data} />
               <RollingAlphaChart chartData={result.chart_data} />
-              <CumReturnChart chartData={result.chart_data} />
+              <AlphaPercentileBar chartData={result.chart_data} meta={result.meta} />
             </>
+          )}
+          {result.model_id === 'fundamental_health' && result.chart_data && (
+            <PillarBars chartData={result.chart_data} />
+          )}
+          {result.model_id === 'sentiment' && result.chart_data && (
+            <SentimentBars chartData={result.chart_data} />
+          )}
+          {result.model_id === 'options_flow' && result.chart_data && (
+            <>
+              <FlowBars chartData={result.chart_data} />
+              <SkewBars chartData={result.chart_data} />
+            </>
+          )}
+          {result.model_id === 'ensemble' && result.chart_data && (
+            <EnsembleVotes chartData={result.chart_data} />
           )}
 
           {/* Model-specific extras */}
@@ -687,7 +910,6 @@ function ResultCard({ result }) {
           {/* Momentum key stats */}
           {result.model_id === 'momentum' && result.meta && (
             <div style={{ marginTop: 14 }}>
-              {/* Return tiles */}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
                 {[
                   { label: '1M Return', value: result.meta.ret_1m },
@@ -708,18 +930,12 @@ function ResultCard({ result }) {
                   )
                 })}
               </div>
-              {/* Signal vote bar */}
-              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ fontSize: 12, color: 'var(--bull)', fontWeight: 700 }}>▲ {result.meta.bull_votes} bull</span>
-                <div style={{ flex: 1, height: 8, background: 'var(--bear)', borderRadius: 4, overflow: 'hidden' }}>
-                  <div style={{
-                    height: '100%', borderRadius: 4, background: 'var(--bull)',
-                    width: `${(result.meta.bull_votes / (result.meta.bull_votes + result.meta.bear_votes)) * 100}%`,
-                    transition: 'width .4s',
-                  }} />
-                </div>
-                <span style={{ fontSize: 12, color: 'var(--bear)', fontWeight: 700 }}>{result.meta.bear_votes} bear ▼</span>
-                <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 8 }}>ADX {result.meta.adx}</span>
+              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 16 }}>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>Composite score</span>
+                <span style={{ fontSize: 16, fontWeight: 800, color: result.meta.score > 0.15 ? 'var(--bull)' : result.meta.score < -0.15 ? 'var(--bear)' : 'var(--muted)' }}>
+                  {result.meta.score > 0 ? '+' : ''}{result.meta.score?.toFixed(3)}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>ADX {result.meta.adx}</span>
                 <span style={{ fontSize: 11, color: 'var(--muted)' }}>52w: {result.meta.pos_52w_pct}%</span>
               </div>
             </div>
@@ -786,21 +1002,102 @@ function ResultCard({ result }) {
             </div>
           )}
 
-          {/* Annual return stats */}
+          {/* Regime state avg returns (3-state) */}
           {result.meta?.bull_state_annual_return != null && (
-            <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
               <div style={{ flex: 1, background: '#4ade8012', border: '1px solid #4ade8030', borderRadius: 8, padding: '10px 14px' }}>
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Bull regime avg return</div>
-                <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--bull)' }}>
+                <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>Bull avg return</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--bull)' }}>
                   {result.meta.bull_state_annual_return > 0 ? '+' : ''}{fmt(result.meta.bull_state_annual_return)}% p.a.
                 </div>
               </div>
+              {result.meta.sideways_state_annual_return != null && (
+                <div style={{ flex: 1, background: '#fbbf2412', border: '1px solid #fbbf2430', borderRadius: 8, padding: '10px 14px' }}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>Sideways avg return</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: '#fbbf24' }}>
+                    {result.meta.sideways_state_annual_return > 0 ? '+' : ''}{fmt(result.meta.sideways_state_annual_return)}% p.a.
+                  </div>
+                </div>
+              )}
               <div style={{ flex: 1, background: '#f8717112', border: '1px solid #f8717130', borderRadius: 8, padding: '10px 14px' }}>
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Bear regime avg return</div>
-                <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--bear)' }}>
+                <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>Bear avg return</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--bear)' }}>
                   {fmt(result.meta.bear_state_annual_return)}% p.a.
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Fundamental health meta */}
+          {result.model_id === 'fundamental_health' && result.meta && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+              {[
+                { label: 'Total Score', value: `${result.meta.total_score}/100`, color: result.meta.total_score >= 65 ? 'var(--bull)' : result.meta.total_score <= 35 ? 'var(--bear)' : '#fbbf24' },
+                { label: 'ROE', value: result.meta.roe != null ? `${result.meta.roe}%` : '—', color: result.meta.roe > 15 ? 'var(--bull)' : result.meta.roe < 0 ? 'var(--bear)' : 'var(--text)' },
+                { label: 'Net Margin', value: result.meta.net_margin != null ? `${result.meta.net_margin}%` : '—', color: result.meta.net_margin > 10 ? 'var(--bull)' : result.meta.net_margin < 0 ? 'var(--bear)' : 'var(--text)' },
+                { label: 'FCF Yield', value: result.meta.fcf_yield != null ? `${result.meta.fcf_yield}%` : '—', color: result.meta.fcf_yield > 4 ? 'var(--bull)' : 'var(--text)' },
+                { label: 'P/E', value: result.meta.pe_ratio ?? '—', color: result.meta.pe_ratio > 40 ? 'var(--bear)' : result.meta.pe_ratio < 15 ? 'var(--bull)' : 'var(--text)' },
+                { label: 'Analyst', value: result.meta.analyst_upside != null ? `${result.meta.analyst_upside > 0 ? '+' : ''}${result.meta.analyst_upside}%` : '—', color: result.meta.analyst_upside > 10 ? 'var(--bull)' : result.meta.analyst_upside < -10 ? 'var(--bear)' : 'var(--text)' },
+              ].map(s => (
+                <div key={s.label} style={{ flex: '1 1 80px', background: 'var(--surface2)', borderRadius: 8, padding: '8px 10px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>{s.label}</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: s.color }}>{s.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Sentiment meta */}
+          {result.model_id === 'sentiment' && result.meta && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+              {[
+                { label: 'Compound', value: `${result.meta.avg_compound > 0 ? '+' : ''}${result.meta.avg_compound?.toFixed(3)}`, color: result.meta.avg_compound > 0.1 ? 'var(--bull)' : result.meta.avg_compound < -0.1 ? 'var(--bear)' : 'var(--muted)' },
+                { label: '% Bullish', value: `${(result.meta.bull_ratio * 100).toFixed(0)}%`, color: result.meta.bull_ratio > 0.5 ? 'var(--bull)' : 'var(--text)' },
+                { label: '% Neutral', value: `${(result.meta.neutral_ratio * 100).toFixed(0)}%`, color: 'var(--muted)' },
+                { label: '% Bearish', value: `${(result.meta.bear_ratio * 100).toFixed(0)}%`, color: result.meta.bear_ratio > 0.5 ? 'var(--bear)' : 'var(--text)' },
+                { label: 'Articles', value: result.meta.article_count, color: 'var(--text)' },
+              ].map(s => (
+                <div key={s.label} style={{ flex: '1 1 70px', background: 'var(--surface2)', borderRadius: 8, padding: '8px 10px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>{s.label}</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: s.color }}>{s.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Options flow meta */}
+          {result.model_id === 'options_flow' && result.meta && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+              {[
+                { label: 'Contracts', value: result.meta.contract_count, color: 'var(--text)' },
+                { label: 'Call Prem', value: result.meta.call_premium >= 1e6 ? `$${(result.meta.call_premium/1e6).toFixed(1)}M` : `$${(result.meta.call_premium/1e3).toFixed(0)}K`, color: 'var(--bull)' },
+                { label: 'Put Prem', value: result.meta.put_premium >= 1e6 ? `$${(result.meta.put_premium/1e6).toFixed(1)}M` : `$${(result.meta.put_premium/1e3).toFixed(0)}K`, color: 'var(--bear)' },
+                { label: 'C/P Ratio', value: result.meta.premium_ratio?.toFixed(2), color: result.meta.premium_ratio > 1.5 ? 'var(--bull)' : result.meta.premium_ratio < 0.7 ? 'var(--bear)' : 'var(--text)' },
+                { label: 'IV Skew', value: result.meta.avg_skew != null ? (result.meta.avg_skew > 0 ? '+' : '') + result.meta.avg_skew.toFixed(3) : '—', color: result.meta.avg_skew > 0.05 ? 'var(--bear)' : result.meta.avg_skew < -0.05 ? 'var(--bull)' : 'var(--text)' },
+              ].map(s => (
+                <div key={s.label} style={{ flex: '1 1 70px', background: 'var(--surface2)', borderRadius: 8, padding: '8px 10px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>{s.label}</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: s.color }}>{s.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Ensemble meta */}
+          {result.model_id === 'ensemble' && result.meta && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+              {[
+                { label: 'Wtd. Score', value: `${result.meta.weighted_score > 0 ? '+' : ''}${result.meta.weighted_score?.toFixed(3)}`, color: result.meta.weighted_score > 0.15 ? 'var(--bull)' : result.meta.weighted_score < -0.15 ? 'var(--bear)' : 'var(--muted)' },
+                { label: 'Agreement', value: `${(result.meta.agreement * 100).toFixed(0)}%`, color: result.meta.agreement > 0.7 ? 'var(--bull)' : 'var(--muted)' },
+                { label: 'Bull', value: result.meta.bull_count, color: 'var(--bull)' },
+                { label: 'Neutral', value: result.meta.neutral_count, color: 'var(--muted)' },
+                { label: 'Bear', value: result.meta.bear_count, color: 'var(--bear)' },
+              ].map(s => (
+                <div key={s.label} style={{ flex: '1 1 70px', background: 'var(--surface2)', borderRadius: 8, padding: '8px 10px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>{s.label}</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: s.color }}>{s.value}</div>
+                </div>
+              ))}
             </div>
           )}
         </div>

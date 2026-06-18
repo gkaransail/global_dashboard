@@ -28,6 +28,255 @@ const FEATURE_META = {
 const FEATURE_ORDER = ['options', 'technical', 'insider', 'institutional']
 const MEDALS = ['🥇', '🥈', '🥉', '4️⃣']
 
+// ── HistoricalBacktest tab ────────────────────────────────────────────────────
+
+function WinBar({ pct, total, correct }) {
+  const w = pct != null ? Math.min(pct, 100) : 0
+  const color = pct == null ? 'var(--muted)' : pct >= 55 ? 'var(--bull)' : pct >= 45 ? 'var(--accent)' : 'var(--bear)'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ flex: 1, height: 8, background: 'var(--surface2)', borderRadius: 4, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${w}%`, background: color, borderRadius: 4, transition: 'width .5s' }} />
+      </div>
+      <span style={{ fontSize: 13, fontWeight: 700, color, minWidth: 40, textAlign: 'right' }}>
+        {pct != null ? `${pct}%` : '—'}
+      </span>
+      <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 55 }}>
+        {correct ?? 0}/{total ?? 0}
+      </span>
+    </div>
+  )
+}
+
+function HistoricalBacktestTab() {
+  const [weeksBack, setWeeksBack] = useState(1)
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [selFeature, setSelFeature] = useState(null)
+  const [pickDir, setPickDir] = useState('all')
+
+  const run = async (w) => {
+    setWeeksBack(w)
+    setLoading(true)
+    setData(null)
+    try {
+      const r = await api.get('/leaderboard/historical-backtest', { params: { weeks_back: w }, timeout: 180000 })
+      setData(r.data)
+      // Auto-select the winner
+      if (r.data.ranking?.length) setSelFeature(r.data.ranking[0].feature)
+    } catch (e) {
+      setData({ error: e.message })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const btn = (active, onClick, children, color) => (
+    <button onClick={onClick} style={{
+      padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+      background: active ? (color || 'var(--accent)') : 'var(--surface2)',
+      color: active ? (color ? '#000' : '#000') : 'var(--muted)',
+    }}>{children}</button>
+  )
+
+  const ranked = data?.ranking ?? []
+  const featData = selFeature ? data?.features?.[selFeature] : null
+
+  let filteredPicks = featData?.picks ?? []
+  if (pickDir === 'bull') filteredPicks = filteredPicks.filter(p => p.direction === 1)
+  if (pickDir === 'bear') filteredPicks = filteredPicks.filter(p => p.direction === -1)
+  if (pickDir === 'correct') filteredPicks = filteredPicks.filter(p => p.correct === 1)
+  if (pickDir === 'wrong') filteredPicks = filteredPicks.filter(p => p.correct === 0)
+
+  const thStyle = {
+    padding: '8px 10px', fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase',
+    letterSpacing: '.5px', textAlign: 'left', borderBottom: '1px solid var(--border)',
+    background: 'var(--surface2)',
+  }
+
+  return (
+    <div style={{ padding: 16 }}>
+      {/* Controls */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 20, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, color: 'var(--muted)' }}>Backtest window:</span>
+        {[1, 2, 3, 4].map(w => btn(weeksBack === w && !!data, () => run(w), `${w}W`, w === 1 ? '#38bdf8' : w === 2 ? '#a78bfa' : w === 3 ? '#fbbf24' : '#4ade80'))}
+        {!data && !loading && (
+          <button onClick={() => run(1)} style={{
+            marginLeft: 8, padding: '7px 18px', borderRadius: 7, border: 'none',
+            background: 'var(--accent)', color: '#000', fontWeight: 700, fontSize: 13, cursor: 'pointer',
+          }}>
+            ▶ Run Last Week Backtest
+          </button>
+        )}
+        {loading && (
+          <div style={{ marginLeft: 8, fontSize: 12, color: 'var(--accent)' }}>
+            ⏳ Running signals across all 4 features + fetching {weeksBack}W historical prices… (~60s)
+          </div>
+        )}
+      </div>
+
+      {data?.error && (
+        <div style={{ padding: 16, color: 'var(--bear)', background: '#f8717115', borderRadius: 8 }}>
+          Error: {data.error}
+        </div>
+      )}
+
+      {data && !data.error && (
+        <>
+          {/* Meta */}
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
+            Entry: <strong style={{ color: 'var(--text)' }}>{data.entry_date}</strong>
+            &nbsp;→&nbsp;
+            Exit: <strong style={{ color: 'var(--text)' }}>{data.exit_date}</strong>
+            &nbsp;·&nbsp;{data.tickers_priced} tickers priced
+          </div>
+
+          {/* Ranked standings */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 12 }}>
+              Feature Rankings — {weeksBack === 1 ? 'Last Week' : `Last ${weeksBack} Weeks`}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {ranked.map((r, i) => {
+                const meta = FEATURE_META[r.feature] || { label: r.feature, color: 'var(--accent)', icon: '?' }
+                const isSelected = selFeature === r.feature
+                return (
+                  <div
+                    key={r.feature}
+                    onClick={() => setSelFeature(r.feature)}
+                    style={{
+                      padding: '12px 16px', borderRadius: 10, cursor: 'pointer',
+                      background: isSelected ? `${meta.color}15` : 'var(--surface)',
+                      border: `1px solid ${isSelected ? meta.color + '66' : 'var(--border)'}`,
+                      transition: 'all .15s',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                      <span style={{ fontSize: 20 }}>{MEDALS[i] ?? ''}</span>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: meta.color }}>{meta.icon} {meta.label}</span>
+                      <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted)' }}>
+                        ▲ bull {r.bull_win_rate ?? '—'}%&nbsp;&nbsp;▼ bear {r.bear_win_rate ?? '—'}%
+                      </span>
+                      {r.avg_directional_return != null && (
+                        <span style={{ fontSize: 12, fontWeight: 700, color: pctColor(r.avg_directional_return) }}>
+                          avg {r.avg_directional_return > 0 ? '+' : ''}{fmt(r.avg_directional_return)}%
+                        </span>
+                      )}
+                    </div>
+                    <WinBar pct={r.win_rate} total={r.total} correct={r.correct} />
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Head-to-head table */}
+          <div style={{ marginBottom: 20, overflowX: 'auto' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>
+              Head-to-Head Summary
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>Rank</th>
+                  <th style={thStyle}>Feature</th>
+                  <th style={{ ...thStyle, textAlign: 'right' }}>Picks</th>
+                  <th style={{ ...thStyle, textAlign: 'right' }}>Win Rate</th>
+                  <th style={{ ...thStyle, textAlign: 'right' }}>Bull Win%</th>
+                  <th style={{ ...thStyle, textAlign: 'right' }}>Bear Win%</th>
+                  <th style={{ ...thStyle, textAlign: 'right' }}>Avg Dir. Return</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ranked.map((r, i) => {
+                  const meta = FEATURE_META[r.feature] || { label: r.feature, color: 'var(--accent)', icon: '?' }
+                  const wr = r.win_rate
+                  const wrColor = wr == null ? 'var(--muted)' : wr >= 55 ? 'var(--bull)' : wr >= 45 ? 'var(--accent)' : 'var(--bear)'
+                  return (
+                    <tr key={r.feature} style={{ borderBottom: '1px solid var(--border)', background: i === 0 ? '#4ade8008' : 'transparent' }}>
+                      <td style={{ padding: '10px 10px' }}>{MEDALS[i] ?? i + 1}</td>
+                      <td style={{ padding: '10px 10px', fontWeight: 700, color: meta.color }}>
+                        {meta.icon} {meta.label}
+                      </td>
+                      <td style={{ padding: '10px 10px', textAlign: 'right', color: 'var(--muted)' }}>{r.total}</td>
+                      <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 800, color: wrColor }}>{fmtPct(wr)}</td>
+                      <td style={{ padding: '10px 10px', textAlign: 'right', color: 'var(--bull)' }}>{fmtPct(r.bull_win_rate)}</td>
+                      <td style={{ padding: '10px 10px', textAlign: 'right', color: 'var(--bear)' }}>{fmtPct(r.bear_win_rate)}</td>
+                      <td style={{ padding: '10px 10px', textAlign: 'right', color: pctColor(r.avg_directional_return), fontWeight: 700 }}>
+                        {r.avg_directional_return != null ? `${r.avg_directional_return > 0 ? '+' : ''}${fmt(r.avg_directional_return)}%` : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Per-feature pick detail */}
+          {selFeature && featData && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: FEATURE_META[selFeature]?.color }}>
+                  {FEATURE_META[selFeature]?.icon} {FEATURE_META[selFeature]?.label} — All Picks
+                </span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {[['all','All'], ['bull','▲ Bull'], ['bear','▼ Bear'], ['correct','✓ Correct'], ['wrong','✗ Wrong']].map(([k, label]) =>
+                    btn(pickDir === k, () => setPickDir(k), label)
+                  )}
+                </div>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>Ticker</th>
+                      <th style={thStyle}>Direction</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Entry $</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Exit $</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Return %</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Directional</th>
+                      <th style={thStyle}>Result</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredPicks.map((p, i) => {
+                      const dirColor = p.direction === 1 ? 'var(--bull)' : 'var(--bear)'
+                      return (
+                        <tr key={`${p.ticker}-${i}`} style={{
+                          borderBottom: '1px solid var(--border)',
+                          background: p.correct === 1 ? '#4ade8008' : p.correct === 0 ? '#f8717108' : 'transparent',
+                        }}>
+                          <td style={{ padding: '8px 10px', fontWeight: 700 }}>{p.ticker}</td>
+                          <td style={{ padding: '8px 10px', color: dirColor, fontWeight: 600 }}>
+                            {p.direction === 1 ? '▲ Bull' : '▼ Bear'}
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--muted)' }}>${fmt(p.entry, 2)}</td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--muted)' }}>${fmt(p.exit, 2)}</td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', color: pctColor(p.return_pct), fontWeight: 600 }}>
+                            {p.return_pct > 0 ? '+' : ''}{fmt(p.return_pct)}%
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', color: pctColor(p.directional_return), fontWeight: 700 }}>
+                            {p.directional_return > 0 ? '+' : ''}{fmt(p.directional_return)}%
+                          </td>
+                          <td style={{ padding: '8px 10px' }}>
+                            {p.correct === 1
+                              ? <span style={{ color: 'var(--bull)', fontWeight: 700 }}>✓</span>
+                              : <span style={{ color: 'var(--bear)', fontWeight: 700 }}>✗</span>}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── FeatureCard ───────────────────────────────────────────────────────────────
 
 function FeatureCard({ data, rank }) {
@@ -511,6 +760,7 @@ export default function LeaderboardFeature() {
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 6 }}>
           {btn(tab === 'results',    () => setTab('results'),    '🏆 Results')}
+          {btn(tab === 'backtest',   () => setTab('backtest'),   '📅 Historical')}
           {btn(tab === 'comparison', () => setTab('comparison'), '⚖️ Comparison')}
           {btn(tab === 'picks',      () => setTab('picks'),      '📋 All Picks')}
         </div>
@@ -547,6 +797,10 @@ export default function LeaderboardFeature() {
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
         {tab === 'results' && (
           <ResultsTab summary={summary} timeframe={timeframe} />
+        )}
+
+        {tab === 'backtest' && (
+          <HistoricalBacktestTab />
         )}
 
         {tab === 'comparison' && (

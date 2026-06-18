@@ -153,6 +153,20 @@ def get_comparison(
     }
 
 
+@router.get("/historical-backtest")
+def historical_backtest(
+    weeks_back: int = Query(1, ge=1, le=4, description="How many weeks back to backtest"),
+):
+    """
+    Run all 4 feature scanners using today's signals, but evaluate them
+    against actual price returns from N weeks ago → today.
+    Returns win rates, directional returns, and ranked feature standings.
+    Takes ~60-90s on first call (options scanner cold).
+    """
+    from features.leaderboard.scanner import run_historical_backtest
+    return run_historical_backtest(weeks_back=weeks_back)
+
+
 @router.post("/scan")
 def trigger_scan(
     timeframe: str = Query("weekly", description="'weekly' or 'monthly'"),

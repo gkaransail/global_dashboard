@@ -177,6 +177,19 @@ export const FEATURES = [
       { id: 'dashboard', label: '🧠 Dashboard', icon: '🧠', path: '/backtest/dashboard' },
     ],
   },
+  {
+    id: 'leaderboard',
+    label: 'Signal Leaderboard',
+    icon: '🏆',
+    status: 'live',
+    section: 'ai',
+    description: 'Compare weekly/monthly Top-20 picks from Options, Technical, Insider, and Institutional signals.',
+    subOptions: [
+      { id: 'results',    label: '🏆 Results',    icon: '🏆', path: '/leaderboard' },
+      { id: 'comparison', label: '⚖️ Comparison', icon: '⚖️', path: '/leaderboard' },
+      { id: 'picks',      label: '📋 All Picks',  icon: '📋', path: '/leaderboard' },
+    ],
+  },
 
   // ── AI ────────────────────────────────────────────────────────────────────
   {

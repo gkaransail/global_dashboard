@@ -3,10 +3,12 @@ Model registry — add new QuantModel subclasses here to expose them via the API
 """
 from features.quant.models.regime import RegimeDetectionModel
 from features.quant.models.mean_reversion import MeanReversionModel
+from features.quant.models.momentum import MomentumModel
 
 _MODELS = [
     RegimeDetectionModel(),
     MeanReversionModel(),
+    MomentumModel(),
 ]
 
 REGISTRY: dict[str, object] = {m.id: m for m in _MODELS}

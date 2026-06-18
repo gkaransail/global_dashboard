@@ -197,6 +197,90 @@ function ZScoreChart({ chartData, meta }) {
   )
 }
 
+// ── EMA chart (momentum) ─────────────────────────────────────────────────────
+
+function EMAChart({ chartData }) {
+  const series = chartData?.price_series ?? []
+  if (series.length < 20) return null
+
+  const W = 560, H = 90
+  const allVals = series.flatMap(d => [d.price, d.ema20, d.ema50, d.ema200].filter(Boolean))
+  const minV = Math.min(...allVals) * 0.997
+  const maxV = Math.max(...allVals) * 1.003
+  const sy = v => H - ((v - minV) / (maxV - minV)) * H
+  const sx = i => (i / (series.length - 1)) * W
+
+  const line = (key, color, width = 1) => {
+    const pts = series.map((d, i) => d[key] ? `${sx(i)},${sy(d[key])}` : null).filter(Boolean)
+    return pts.length > 1 ? <polyline points={pts.join(' ')} fill="none" stroke={color} strokeWidth={width} /> : null
+  }
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>Price vs EMAs — last 6 months</div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+        style={{ display: 'block', borderRadius: 6, background: 'var(--surface2)' }}>
+        {line('ema200', '#f8717155', 1)}
+        {line('ema50',  '#fbbf2480', 1.2)}
+        {line('ema20',  '#38bdf870', 1)}
+        {line('price',  'var(--accent)', 1.8)}
+        <circle cx={sx(series.length - 1)} cy={sy(series[series.length - 1].price)}
+          r={3} fill="var(--accent)" />
+      </svg>
+      <div style={{ display: 'flex', gap: 14, marginTop: 4, fontSize: 11 }}>
+        <span style={{ color: 'var(--accent)' }}>— Price</span>
+        <span style={{ color: '#38bdf8' }}>— EMA20</span>
+        <span style={{ color: '#fbbf24' }}>— EMA50</span>
+        <span style={{ color: '#f87171' }}>— EMA200</span>
+      </div>
+    </div>
+  )
+}
+
+// ── MACD chart (momentum) ─────────────────────────────────────────────────────
+
+function MACDChart({ chartData }) {
+  const series = chartData?.macd_series ?? []
+  if (series.length < 10) return null
+
+  const W = 560, H = 60
+  const allVals = series.flatMap(d => [d.macd, d.signal, d.hist])
+  const absMax  = Math.max(Math.abs(Math.min(...allVals)), Math.abs(Math.max(...allVals))) * 1.1 || 1
+  const sy = v => H / 2 - (v / absMax) * (H / 2)
+  const sx = i => (i / (series.length - 1)) * W
+  const zeroY = H / 2
+
+  const linePts = (key) => series.map((d, i) => `${sx(i)},${sy(d[key])}`).join(' ')
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>MACD (12/26/9) — last 4 months</div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+        style={{ display: 'block', borderRadius: 6, background: 'var(--surface2)' }}>
+        {/* Zero line */}
+        <line x1={0} y1={zeroY} x2={W} y2={zeroY} stroke="#ffffff15" strokeWidth={1} />
+        {/* Histogram bars */}
+        {series.map((d, i) => {
+          const x = sx(i), barW = Math.max(W / series.length - 0.5, 1)
+          const top = Math.min(sy(d.hist), zeroY), h = Math.abs(sy(d.hist) - zeroY)
+          return <rect key={i} x={x - barW / 2} y={top} width={barW} height={Math.max(h, 0.5)}
+            fill={d.hist >= 0 ? '#4ade8044' : '#f8717144'} />
+        })}
+        {/* MACD line */}
+        <polyline points={linePts('macd')} fill="none" stroke="#38bdf8" strokeWidth={1.5} />
+        {/* Signal line */}
+        <polyline points={linePts('signal')} fill="none" stroke="#f87171" strokeWidth={1} strokeDasharray="3,2" />
+      </svg>
+      <div style={{ display: 'flex', gap: 14, marginTop: 4, fontSize: 11 }}>
+        <span style={{ color: '#38bdf8' }}>— MACD</span>
+        <span style={{ color: '#f87171' }}>--- Signal</span>
+        <span style={{ color: '#4ade80' }}>■ Hist +</span>
+        <span style={{ color: '#f87171' }}>■ Hist −</span>
+      </div>
+    </div>
+  )
+}
+
 // ── Transition matrix ─────────────────────────────────────────────────────────
 
 function TransitionMatrix({ matrix }) {
@@ -328,6 +412,12 @@ function ResultCard({ result }) {
               <ZScoreChart chartData={result.chart_data} meta={result.meta} />
             </>
           )}
+          {result.model_id === 'momentum' && result.chart_data && (
+            <>
+              <EMAChart chartData={result.chart_data} />
+              <MACDChart chartData={result.chart_data} />
+            </>
+          )}
 
           {/* Model-specific extras */}
           {result.meta?.transition_matrix && (
@@ -350,6 +440,47 @@ function ResultCard({ result }) {
                   <div style={{ fontSize: 16, fontWeight: 800, color: s.color }}>{s.value}</div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Momentum key stats */}
+          {result.model_id === 'momentum' && result.meta && (
+            <div style={{ marginTop: 14 }}>
+              {/* Return tiles */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                {[
+                  { label: '1M Return', value: result.meta.ret_1m },
+                  { label: '3M Return', value: result.meta.ret_3m },
+                  { label: '6M Return', value: result.meta.ret_6m },
+                  { label: '12M Return', value: result.meta.ret_12m },
+                  { label: '3M vs SPY', value: result.meta.rs_3m_vs_spy },
+                  { label: '6M vs SPY', value: result.meta.rs_6m_vs_spy },
+                ].map(s => {
+                  const c = s.value == null ? 'var(--muted)' : s.value > 0 ? 'var(--bull)' : 'var(--bear)'
+                  return (
+                    <div key={s.label} style={{ flex: '1 1 70px', background: 'var(--surface2)', borderRadius: 8, padding: '8px 10px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>{s.label}</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: c }}>
+                        {s.value != null ? `${s.value > 0 ? '+' : ''}${s.value}%` : '—'}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              {/* Signal vote bar */}
+              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 12, color: 'var(--bull)', fontWeight: 700 }}>▲ {result.meta.bull_votes} bull</span>
+                <div style={{ flex: 1, height: 8, background: 'var(--bear)', borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%', borderRadius: 4, background: 'var(--bull)',
+                    width: `${(result.meta.bull_votes / (result.meta.bull_votes + result.meta.bear_votes)) * 100}%`,
+                    transition: 'width .4s',
+                  }} />
+                </div>
+                <span style={{ fontSize: 12, color: 'var(--bear)', fontWeight: 700 }}>{result.meta.bear_votes} bear ▼</span>
+                <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 8 }}>ADX {result.meta.adx}</span>
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>52w: {result.meta.pos_52w_pct}%</span>
+              </div>
             </div>
           )}
 

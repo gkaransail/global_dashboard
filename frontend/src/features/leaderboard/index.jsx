@@ -60,9 +60,9 @@ function HistoricalBacktestTab() {
     setLoading(true)
     setData(null)
     try {
-      const r = await api.get('/leaderboard/historical-backtest', { params: { weeks_back: w }, timeout: 180000 })
-      setData(r.data)
-      if (r.data.ranking?.length) setSelFeature(r.data.ranking[0].feature)
+      const r = await api.get(`/leaderboard/historical-backtest?weeks_back=${w}`)
+      setData(r)
+      if (r.ranking?.length) setSelFeature(r.ranking[0].feature)
     } catch (e) {
       setData({ error: e.message })
     } finally {
@@ -324,8 +324,8 @@ function ResultsTab({ summary, timeframe }) {
 
   useEffect(() => {
     setLoading(true)
-    api.get('/leaderboard/picks', { params: { timeframe, evaluated_only: true, limit: 50 } })
-      .then(r => setResults(r.data.picks || {}))
+    api.get(`/leaderboard/picks?timeframe=${timeframe}&evaluated_only=true&limit=50`)
+      .then(r => setResults(r.picks || {}))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [timeframe])
@@ -691,21 +691,21 @@ export default function LeaderboardFeature() {
   const [lastScan, setLastScan] = useState(null)
 
   const loadSummary = useCallback(() => {
-    api.get('/leaderboard/summary').then(r => setSummary(r.data)).catch(() => {})
+    api.get('/leaderboard/summary').then(r => setSummary(r)).catch(() => {})
   }, [])
 
   const loadPicks = useCallback(() => {
     setLoading(true)
-    api.get('/leaderboard/picks', { params: { timeframe } })
-      .then(r => setPicks(r.data.picks || {}))
+    api.get(`/leaderboard/picks?timeframe=${timeframe}`)
+      .then(r => setPicks(r.picks || {}))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [timeframe])
 
   const loadComparison = useCallback(() => {
     setLoading(true)
-    api.get('/leaderboard/comparison', { params: { timeframe, min_consensus: 2 } })
-      .then(r => setComparison(r.data.rows || []))
+    api.get(`/leaderboard/comparison?timeframe=${timeframe}&min_consensus=2`)
+      .then(r => setComparison(r.rows || []))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [timeframe])
@@ -721,7 +721,7 @@ export default function LeaderboardFeature() {
     setScanning(true)
     setScanMsg(null)
     try {
-      await api.post('/leaderboard/scan', null, { params: { timeframe: tf } })
+      await api.post(`/leaderboard/scan?timeframe=${tf}`, null)
       setScanMsg(`✓ ${tf} scan started — picks will appear in ~60s.`)
       setLastScan(new Date().toLocaleTimeString())
     } catch (e) {

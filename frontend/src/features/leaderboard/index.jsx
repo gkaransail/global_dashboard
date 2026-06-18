@@ -62,7 +62,6 @@ function HistoricalBacktestTab() {
     try {
       const r = await api.get('/leaderboard/historical-backtest', { params: { weeks_back: w }, timeout: 180000 })
       setData(r.data)
-      // Auto-select the winner
       if (r.data.ranking?.length) setSelFeature(r.data.ranking[0].feature)
     } catch (e) {
       setData({ error: e.message })
@@ -70,6 +69,9 @@ function HistoricalBacktestTab() {
       setLoading(false)
     }
   }
+
+  // Auto-run 1W backtest on mount
+  useEffect(() => { run(1) }, [])
 
   const btn = (active, onClick, children, color) => (
     <button onClick={onClick} style={{
@@ -100,17 +102,9 @@ function HistoricalBacktestTab() {
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 20, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 13, color: 'var(--muted)' }}>Backtest window:</span>
         {[1, 2, 3, 4].map(w => btn(weeksBack === w && !!data, () => run(w), `${w}W`, w === 1 ? '#38bdf8' : w === 2 ? '#a78bfa' : w === 3 ? '#fbbf24' : '#4ade80'))}
-        {!data && !loading && (
-          <button onClick={() => run(1)} style={{
-            marginLeft: 8, padding: '7px 18px', borderRadius: 7, border: 'none',
-            background: 'var(--accent)', color: '#000', fontWeight: 700, fontSize: 13, cursor: 'pointer',
-          }}>
-            ▶ Run Last Week Backtest
-          </button>
-        )}
         {loading && (
           <div style={{ marginLeft: 8, fontSize: 12, color: 'var(--accent)' }}>
-            ⏳ Running signals across all 4 features + fetching {weeksBack}W historical prices… (~60s)
+            ⏳ Fetching signals + {weeksBack}W historical prices… (~60s)
           </div>
         )}
       </div>
@@ -347,8 +341,8 @@ function ResultsTab({ summary, timeframe }) {
   const picks = results[selFeature] || {}
   const allPicks = [...(picks.bullish || []), ...(picks.bearish || [])]
     .sort((a, b) => {
-      const ar = (a.return_pct ?? 0) * (a.direction ?? 0)
-      const br = (b.return_pct ?? 0) * (b.direction ?? 0)
+      const ar = (a.return_pct ?? 0) * (a.direction === 1 ? 1 : -1)
+      const br = (b.return_pct ?? 0) * (b.direction === 1 ? 1 : -1)
       return br - ar
     })
 
@@ -360,6 +354,7 @@ function ResultsTab({ summary, timeframe }) {
   }
 
   const noEval = features.every(f => !f.evaluated)
+  const evalDate = '2026-06-25'
 
   return (
     <div style={{ padding: 0 }}>
@@ -371,12 +366,11 @@ function ResultsTab({ summary, timeframe }) {
 
         {noEval ? (
           <div style={{
-            padding: '14px 16px', background: '#fbbf2415', border: '1px solid #fbbf2440',
-            borderRadius: 8, fontSize: 12, color: '#fbbf24', marginBottom: 16,
+            padding: '14px 16px', background: '#38bdf815', border: '1px solid #38bdf840',
+            borderRadius: 8, fontSize: 12, color: '#38bdf8', marginBottom: 16,
           }}>
-            ⚠️ No evaluated predictions yet. Run a scan and wait for the evaluation window (7d weekly / 30d monthly),
-            or use <strong>Force Evaluate All</strong> in the Backtest tab to grade immediately at current prices.
-            Note: force-evaluate during market close shows 0% return (entry = exit price).
+            📅 Picks logged on 2026-06-18 — evaluations open on <strong>{evalDate}</strong> (7-day window).
+            Switch to the <strong>📅 Historical</strong> tab to see last-week performance now.
           </div>
         ) : null}
 
@@ -685,7 +679,7 @@ function PicksList({ picks, direction }) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function LeaderboardFeature() {
-  const [tab, setTab] = useState('results')
+  const [tab, setTab] = useState('backtest')
   const [timeframe, setTimeframe] = useState('1w')
   const [pickDir, setPickDir] = useState(1)
   const [summary, setSummary] = useState(null)

@@ -63,6 +63,7 @@ def get_picks(
         direction = pick.get("direction", 0)
         entry = {
             "ticker":         pick["ticker"],
+            "direction":      direction,
             "score":          pick.get("score"),
             "spot_entry":     pick.get("spot_at_prediction"),
             "spot_exit":      pick.get("spot_at_outcome"),

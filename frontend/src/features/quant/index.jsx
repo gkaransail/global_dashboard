@@ -197,6 +197,101 @@ function ZScoreChart({ chartData, meta }) {
   )
 }
 
+// ── Realized vol chart (volatility) ──────────────────────────────────────────
+
+function RealizedVolChart({ chartData }) {
+  const series = chartData?.vol_series ?? []
+  if (series.length < 10) return null
+
+  const W = 560, H = 80
+  const allVals = series.flatMap(d => [d.rv10, d.rv21, d.rv63]).filter(Boolean)
+  const minV = 0
+  const maxV = Math.max(...allVals) * 1.05
+  const sy = v => H - ((v - minV) / (maxV - minV)) * H
+  const sx = i => (i / (series.length - 1)) * W
+
+  const line = (key, color, dash) => {
+    const pts = series.map((d, i) => `${sx(i)},${sy(d[key])}`).join(' ')
+    return <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeDasharray={dash || ''} />
+  }
+
+  // Shade the area under rv21
+  const areaTop = series.map((d, i) => `${sx(i)},${sy(d.rv21)}`).join(' ')
+  const areaBot = `${sx(series.length - 1)},${H} ${sx(0)},${H}`
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>Realized Volatility — last 6 months (annualised %)</div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+        style={{ display: 'block', borderRadius: 6, background: 'var(--surface2)' }}>
+        <polygon points={`${areaTop} ${areaBot}`} fill="#a78bfa15" />
+        {line('rv63', '#fbbf2466', '4,3')}
+        {line('rv21', '#a78bfa',   '')}
+        {line('rv10', '#38bdf8aa', '')}
+        <circle cx={sx(series.length - 1)} cy={sy(series[series.length - 1].rv21)}
+          r={3} fill="#a78bfa" />
+      </svg>
+      <div style={{ display: 'flex', gap: 14, marginTop: 4, fontSize: 11 }}>
+        <span style={{ color: '#38bdf8' }}>— RV10</span>
+        <span style={{ color: '#a78bfa' }}>— RV21</span>
+        <span style={{ color: '#fbbf24' }}>--- RV63</span>
+      </div>
+    </div>
+  )
+}
+
+// ── VIX chart (volatility) ────────────────────────────────────────────────────
+
+function VIXChart({ chartData }) {
+  const series = chartData?.vix_series ?? []
+  if (series.length < 10) return null
+
+  const W = 560, H = 70
+  const vixVals = series.map(d => d.vix)
+  const minV = Math.min(...vixVals) * 0.95
+  const maxV = Math.max(...vixVals) * 1.05
+  const sy = v => H - ((v - minV) / (maxV - minV)) * H
+  const sx = i => (i / (series.length - 1)) * W
+
+  const pts = vixVals.map((v, i) => `${sx(i)},${sy(v)}`).join(' ')
+  const area = `${pts} ${sx(series.length - 1)},${H} ${sx(0)},${H}`
+
+  // Threshold lines
+  const thresholds = [
+    { v: 15, label: '15', color: '#4ade8066' },
+    { v: 20, label: '20', color: '#fbbf2466' },
+    { v: 30, label: '30', color: '#f8717166' },
+  ].filter(t => t.v >= minV && t.v <= maxV)
+
+  const currentVix = vixVals[vixVals.length - 1]
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>VIX — 1 year</div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+        style={{ display: 'block', borderRadius: 6, background: 'var(--surface2)' }}>
+        <polygon points={area} fill={currentVix > 25 ? '#f8717115' : currentVix > 18 ? '#fbbf2410' : '#4ade8010'} />
+        {thresholds.map(t => (
+          <g key={t.v}>
+            <line x1={0} y1={sy(t.v)} x2={W} y2={sy(t.v)} stroke={t.color} strokeWidth={1} strokeDasharray="3,3" />
+            <text x={4} y={sy(t.v) - 2} fontSize={8} fill={t.color}>{t.label}</text>
+          </g>
+        ))}
+        <polyline points={pts} fill="none"
+          stroke={currentVix > 25 ? '#f87171' : currentVix > 18 ? '#fbbf24' : '#4ade80'}
+          strokeWidth={1.5} />
+        <circle cx={sx(series.length - 1)} cy={sy(currentVix)} r={3}
+          fill={currentVix > 25 ? '#f87171' : currentVix > 18 ? '#fbbf24' : '#4ade80'} />
+      </svg>
+      <div style={{ display: 'flex', gap: 14, marginTop: 4, fontSize: 11, color: 'var(--muted)' }}>
+        <span style={{ color: '#4ade80' }}>Low (&lt;15)</span>
+        <span style={{ color: '#fbbf24' }}>Normal (15-20)</span>
+        <span style={{ color: '#f87171' }}>Elevated/High (&gt;20)</span>
+      </div>
+    </div>
+  )
+}
+
 // ── EMA chart (momentum) ─────────────────────────────────────────────────────
 
 function EMAChart({ chartData }) {
@@ -418,6 +513,12 @@ function ResultCard({ result }) {
               <MACDChart chartData={result.chart_data} />
             </>
           )}
+          {result.model_id === 'volatility_regime' && result.chart_data && (
+            <>
+              <VIXChart chartData={result.chart_data} />
+              <RealizedVolChart chartData={result.chart_data} />
+            </>
+          )}
 
           {/* Model-specific extras */}
           {result.meta?.transition_matrix && (
@@ -480,6 +581,47 @@ function ResultCard({ result }) {
                 <span style={{ fontSize: 12, color: 'var(--bear)', fontWeight: 700 }}>{result.meta.bear_votes} bear ▼</span>
                 <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 8 }}>ADX {result.meta.adx}</span>
                 <span style={{ fontSize: 11, color: 'var(--muted)' }}>52w: {result.meta.pos_52w_pct}%</span>
+              </div>
+            </div>
+          )}
+
+          {/* Volatility regime key stats */}
+          {result.model_id === 'volatility_regime' && result.meta && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                {[
+                  { label: 'VIX', value: `${result.meta.vix} (${result.meta.vix_regime})`, color: result.meta.vix > 25 ? 'var(--bear)' : result.meta.vix > 18 ? '#fbbf24' : 'var(--bull)' },
+                  { label: 'VIX Pct', value: `${result.meta.vix_percentile}th`, color: result.meta.vix_percentile > 70 ? 'var(--bear)' : result.meta.vix_percentile < 30 ? 'var(--bull)' : 'var(--text)' },
+                  { label: 'RV 10d', value: `${result.meta.rv10}%`, color: result.meta.rv10 > 50 ? 'var(--bear)' : result.meta.rv10 < 20 ? 'var(--bull)' : 'var(--text)' },
+                  { label: 'RV 21d', value: `${result.meta.rv21}%`, color: result.meta.rv21 > 40 ? 'var(--bear)' : result.meta.rv21 < 20 ? 'var(--bull)' : 'var(--text)' },
+                  { label: 'RV 63d', value: `${result.meta.rv63}%`, color: 'var(--text)' },
+                  { label: 'Parkinson', value: `${result.meta.parkinson_vol}%`, color: 'var(--text)' },
+                  { label: 'EWMA Vol', value: `${result.meta.ewma_vol}%`, color: 'var(--text)' },
+                  { label: 'ATR Pct', value: `${result.meta.atr_percentile}th`, color: result.meta.atr_percentile > 75 ? 'var(--bear)' : 'var(--text)' },
+                ].map(s => (
+                  <div key={s.label} style={{ flex: '1 1 70px', background: 'var(--surface2)', borderRadius: 8, padding: '8px 10px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>{s.label}</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: s.color }}>{s.value}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Vol composite score bar */}
+              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>Vol score</span>
+                <div style={{ flex: 1, height: 8, background: 'var(--surface)', borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%', borderRadius: 4,
+                    width: `${result.meta.vol_composite}%`,
+                    background: result.meta.vol_composite > 60 ? 'var(--bear)' : result.meta.vol_composite < 35 ? 'var(--bull)' : '#fbbf24',
+                    transition: 'width .4s',
+                  }} />
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 800, color: result.meta.vol_composite > 60 ? 'var(--bear)' : result.meta.vol_composite < 35 ? 'var(--bull)' : '#fbbf24' }}>
+                  {result.meta.vol_composite}/100
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 4 }}>
+                  {result.meta.vol_term_structure}
+                </span>
               </div>
             </div>
           )}

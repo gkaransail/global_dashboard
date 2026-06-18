@@ -292,6 +292,139 @@ function VIXChart({ chartData }) {
   )
 }
 
+// ── Factor beta bars ──────────────────────────────────────────────────────────
+
+function FactorBars({ chartData }) {
+  const bars = chartData?.factor_bars ?? []
+  if (!bars.length) return null
+  const maxAbs = Math.max(...bars.map(b => Math.abs(b.beta)), 0.1)
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>Factor Loadings (β)</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {bars.map(b => {
+          const pct  = (Math.abs(b.beta) / maxAbs) * 50   // max 50% of half-width
+          const bull = b.beta > 0
+          const color = bull ? 'var(--bull)' : 'var(--bear)'
+          const sigDot = b.significant ? <span style={{ color: '#fbbf24', marginLeft: 3 }}>★</span> : null
+          return (
+            <div key={b.factor} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 11, color: 'var(--muted)', width: 160, flexShrink: 0 }}>{b.factor}</span>
+              {/* Centre-origin bar */}
+              <div style={{ flex: 1, display: 'flex', height: 16, position: 'relative', background: 'var(--surface2)', borderRadius: 4 }}>
+                <div style={{
+                  position: 'absolute',
+                  left: bull ? '50%' : `${50 - pct}%`,
+                  width: `${pct}%`,
+                  height: '100%',
+                  background: color,
+                  borderRadius: 4,
+                  opacity: b.significant ? 1 : 0.45,
+                }} />
+                {/* Zero line */}
+                <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: 'var(--border)' }} />
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 700, color, width: 54, textAlign: 'right', flexShrink: 0 }}>
+                {b.beta > 0 ? '+' : ''}{b.beta.toFixed(3)}{sigDot}
+              </span>
+              <span style={{ fontSize: 11, color: b.contribution > 0 ? 'var(--bull)' : 'var(--bear)', width: 56, textAlign: 'right', flexShrink: 0 }}>
+                {b.contribution > 0 ? '+' : ''}{b.contribution.toFixed(1)}%
+              </span>
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 10, color: 'var(--muted)' }}>
+        <span>★ = p &lt; 0.05</span>
+        <span style={{ marginLeft: 'auto' }}>Right column: 63d factor contribution (ann.)</span>
+      </div>
+    </div>
+  )
+}
+
+// ── Rolling alpha chart ───────────────────────────────────────────────────────
+
+function RollingAlphaChart({ chartData }) {
+  const series = chartData?.roll_alpha ?? []
+  if (series.length < 10) return null
+
+  const W = 560, H = 70
+  const vals = series.map(d => d.alpha)
+  const absMax = Math.max(Math.abs(Math.min(...vals)), Math.abs(Math.max(...vals)), 5) * 1.1
+  const sy = v => H / 2 - (v / absMax) * (H / 2)
+  const sx = i => (i / (series.length - 1)) * W
+  const zeroY = H / 2
+
+  const pts = vals.map((v, i) => `${sx(i)},${sy(v)}`).join(' ')
+  const areaAbove = vals.map((v, i) => `${sx(i)},${sy(Math.max(v, 0))}`).join(' ')
+  const areaBelow = vals.map((v, i) => `${sx(i)},${sy(Math.min(v, 0))}`).join(' ')
+  const currentAlpha = vals[vals.length - 1]
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>
+        Rolling Alpha (63d window, annualised) — last 6 months
+      </div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+        style={{ display: 'block', borderRadius: 6, background: 'var(--surface2)' }}>
+        <line x1={0} y1={zeroY} x2={W} y2={zeroY} stroke="#ffffff20" strokeWidth={1} />
+        <polygon points={`${areaAbove} ${sx(series.length-1)},${zeroY} ${sx(0)},${zeroY}`} fill="#4ade8020" />
+        <polygon points={`${areaBelow} ${sx(series.length-1)},${zeroY} ${sx(0)},${zeroY}`} fill="#f8717120" />
+        <polyline points={pts} fill="none"
+          stroke={currentAlpha > 0 ? 'var(--bull)' : 'var(--bear)'} strokeWidth={1.5} />
+        <circle cx={sx(series.length-1)} cy={sy(currentAlpha)} r={3}
+          fill={currentAlpha > 0 ? 'var(--bull)' : 'var(--bear)'} />
+        <text x={W - 3} y={zeroY - 3} fontSize={8} fill="#ffffff30" textAnchor="end">0%</text>
+      </svg>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 11 }}>
+        <span style={{ color: 'var(--muted)' }}>Rolling Jensen's α</span>
+        <span style={{ color: currentAlpha > 0 ? 'var(--bull)' : 'var(--bear)', fontWeight: 700 }}>
+          Current: {currentAlpha > 0 ? '+' : ''}{currentAlpha?.toFixed(1)}% p.a.
+        </span>
+      </div>
+    </div>
+  )
+}
+
+// ── Actual vs fitted return chart ─────────────────────────────────────────────
+
+function CumReturnChart({ chartData }) {
+  const series = chartData?.cum_series ?? []
+  if (series.length < 10) return null
+
+  const W = 560, H = 80
+  const allVals = series.flatMap(d => [d.actual, d.fitted])
+  const minV = Math.min(...allVals) - 1
+  const maxV = Math.max(...allVals) + 1
+  const sy = v => H - ((v - minV) / (maxV - minV)) * H
+  const sx = i => (i / (series.length - 1)) * W
+  const zeroY = sy(0)
+
+  const actualPts  = series.map((d, i) => `${sx(i)},${sy(d.actual)}`).join(' ')
+  const fittedPts  = series.map((d, i) => `${sx(i)},${sy(d.fitted)}`).join(' ')
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>Actual vs Factor-Explained Return (cumulative, 1 year)</div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+        style={{ display: 'block', borderRadius: 6, background: 'var(--surface2)' }}>
+        {zeroY > 0 && zeroY < H && (
+          <line x1={0} y1={zeroY} x2={W} y2={zeroY} stroke="#ffffff15" strokeWidth={1} strokeDasharray="3,3" />
+        )}
+        <polyline points={fittedPts} fill="none" stroke="#fbbf2488" strokeWidth={1.2} strokeDasharray="4,2" />
+        <polyline points={actualPts} fill="none" stroke="var(--accent)" strokeWidth={1.5} />
+        <circle cx={sx(series.length-1)} cy={sy(series[series.length-1].actual)} r={3} fill="var(--accent)" />
+      </svg>
+      <div style={{ display: 'flex', gap: 16, marginTop: 4, fontSize: 11 }}>
+        <span style={{ color: 'var(--accent)' }}>— Actual excess return</span>
+        <span style={{ color: '#fbbf24' }}>--- Factor-explained</span>
+        <span style={{ color: 'var(--muted)', marginLeft: 'auto', fontSize: 10 }}>Gap = alpha</span>
+      </div>
+    </div>
+  )
+}
+
 // ── EMA chart (momentum) ─────────────────────────────────────────────────────
 
 function EMAChart({ chartData }) {
@@ -519,6 +652,13 @@ function ResultCard({ result }) {
               <RealizedVolChart chartData={result.chart_data} />
             </>
           )}
+          {result.model_id === 'factor_model' && result.chart_data && (
+            <>
+              <FactorBars chartData={result.chart_data} />
+              <RollingAlphaChart chartData={result.chart_data} />
+              <CumReturnChart chartData={result.chart_data} />
+            </>
+          )}
 
           {/* Model-specific extras */}
           {result.meta?.transition_matrix && (
@@ -623,6 +763,26 @@ function ResultCard({ result }) {
                   {result.meta.vol_term_structure}
                 </span>
               </div>
+            </div>
+          )}
+
+          {/* Factor model key stats */}
+          {result.model_id === 'factor_model' && result.meta && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+              {[
+                { label: "Jensen's α", value: `${result.meta.alpha_annual > 0 ? '+' : ''}${result.meta.alpha_annual}% p.a.`, color: result.meta.alpha_annual > 0 ? 'var(--bull)' : result.meta.alpha_annual < 0 ? 'var(--bear)' : 'var(--muted)', sub: result.meta.alpha_significant ? '★ significant' : `p=${result.meta.alpha_pval}` },
+                { label: 'R²', value: `${result.meta.r_squared}%`, color: result.meta.r_squared > 60 ? 'var(--bull)' : 'var(--text)', sub: 'variance explained' },
+                { label: 'Resid. Vol', value: `${result.meta.resid_vol}%`, color: 'var(--text)', sub: 'idiosyncratic' },
+                { label: 'Market β', value: result.meta.betas?.MKT != null ? `${result.meta.betas.MKT > 0 ? '+' : ''}${result.meta.betas.MKT}` : '—', color: result.meta.betas?.MKT > 1.2 ? 'var(--bear)' : result.meta.betas?.MKT < 0.8 ? 'var(--bull)' : 'var(--text)', sub: 'market sensitivity' },
+                { label: 'Factor Contrib.', value: `${result.meta.total_factor_contribution > 0 ? '+' : ''}${result.meta.total_factor_contribution}% p.a.`, color: result.meta.total_factor_contribution > 0 ? 'var(--bull)' : 'var(--bear)', sub: '63d annualised' },
+                { label: 'Predicted', value: `${result.meta.predicted_annual > 0 ? '+' : ''}${result.meta.predicted_annual}% p.a.`, color: result.meta.predicted_annual > 0 ? 'var(--bull)' : 'var(--bear)', sub: 'α + factors' },
+              ].map(s => (
+                <div key={s.label} style={{ flex: '1 1 90px', background: 'var(--surface2)', borderRadius: 8, padding: '8px 12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>{s.label}</div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: s.color }}>{s.value}</div>
+                  {s.sub && <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>{s.sub}</div>}
+                </div>
+              ))}
             </div>
           )}
 

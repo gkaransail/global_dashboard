@@ -5,12 +5,14 @@ from features.quant.models.regime import RegimeDetectionModel
 from features.quant.models.mean_reversion import MeanReversionModel
 from features.quant.models.momentum import MomentumModel
 from features.quant.models.volatility import VolatilityRegimeModel
+from features.quant.models.factor import FactorModel
 
 _MODELS = [
     RegimeDetectionModel(),
     MeanReversionModel(),
     MomentumModel(),
     VolatilityRegimeModel(),
+    FactorModel(),
 ]
 
 REGISTRY: dict[str, object] = {m.id: m for m in _MODELS}

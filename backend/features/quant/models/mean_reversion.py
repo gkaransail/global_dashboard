@@ -68,6 +68,7 @@ class MeanReversionModel(QuantModel):
         "Signals when price is stretched and statistically likely to revert."
     )
     category    = "reversion"
+    timeframe   = "short"
 
     def analyze(self, ticker: str) -> QuantResult:
         # ── 1. Price data ─────────────────────────────────────────────────────
@@ -219,6 +220,8 @@ class MeanReversionModel(QuantModel):
             ticker     = ticker.upper(),
             model_id   = self.id,
             model_name = self.name,
+            category   = self.category,
+            timeframe  = self.timeframe,
             direction  = direction,
             confidence = confidence,
             regime     = regime,

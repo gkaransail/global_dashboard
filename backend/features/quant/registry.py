@@ -33,6 +33,7 @@ def list_models() -> list[dict]:
             "name":        m.name,
             "description": m.description,
             "category":    m.category,
+            "timeframe":   m.timeframe,
         }
         for m in _MODELS
     ]

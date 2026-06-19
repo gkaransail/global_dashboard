@@ -55,6 +55,7 @@ class FundamentalHealthModel(QuantModel):
         "Signals whether the business quality supports or contradicts price action."
     )
     category    = "fundamental"
+    timeframe   = "long"
 
     def analyze(self, ticker: str) -> QuantResult:
         # ── 1. Fetch yfinance data ────────────────────────────────────────────
@@ -251,6 +252,8 @@ class FundamentalHealthModel(QuantModel):
             ticker     = ticker.upper(),
             model_id   = self.id,
             model_name = self.name,
+            category   = self.category,
+            timeframe  = self.timeframe,
             direction  = direction,
             confidence = confidence,
             regime     = regime,

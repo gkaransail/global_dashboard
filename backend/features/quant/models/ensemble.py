@@ -45,6 +45,7 @@ class EnsembleModel(QuantModel):
         "momentum 25%, factor 20%, mean reversion 15%, volatility 15%."
     )
     category    = "ensemble"
+    timeframe   = "meta"
 
     def analyze(self, ticker: str) -> QuantResult:
         # ── 1. Import all component models ───────────────────────────────────
@@ -181,6 +182,8 @@ class EnsembleModel(QuantModel):
             ticker     = ticker.upper(),
             model_id   = self.id,
             model_name = self.name,
+            category   = self.category,
+            timeframe  = self.timeframe,
             direction  = direction,
             confidence = confidence,
             regime     = regime,

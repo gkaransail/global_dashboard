@@ -762,9 +762,10 @@ function ResultCard({ result }) {
     )
   }
 
-  const catColor  = CATEGORY_COLOR[result.model_id?.split('_')[0]] || 'var(--accent)'
+  const catColor  = CATEGORY_COLOR[result.category] || CATEGORY_COLOR[result.model_id?.split('_')[0]] || 'var(--accent)'
   const dirColor  = DIRECTION_COLOR[String(result.direction)] || 'var(--muted)'
   const dirLabel  = DIRECTION_LABEL[String(result.direction)] || '—'
+  const tfCfg     = TIMEFRAME_CONFIG[result.timeframe] || null
 
   return (
     <div style={{
@@ -781,8 +782,18 @@ function ResultCard({ result }) {
         }}
       >
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, color: catColor, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 2 }}>
-            {result.model_name}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+            <span style={{ fontSize: 11, color: catColor, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.5px' }}>
+              {result.model_name}
+            </span>
+            {tfCfg && (
+              <span style={{
+                fontSize: 10, padding: '1px 7px', borderRadius: 8,
+                background: `${tfCfg.color}20`, color: tfCfg.color, fontWeight: 700,
+              }}>
+                {tfCfg.icon} {tfCfg.label}
+              </span>
+            )}
           </div>
           <div style={{ fontSize: 22, fontWeight: 800, color: dirColor }}>{dirLabel}</div>
         </div>
@@ -1106,10 +1117,37 @@ function ResultCard({ result }) {
   )
 }
 
+// ── Timeframe config ──────────────────────────────────────────────────────────
+
+const TIMEFRAME_CONFIG = {
+  short: {
+    label: 'Short-Term',
+    sublabel: 'Days → ~2 weeks',
+    color: '#f59e0b',
+    icon: '⚡',
+    description: 'React quickly to price dislocations, news flow, and options positioning',
+  },
+  long: {
+    label: 'Long-Term',
+    sublabel: 'Weeks → Months',
+    color: '#34d399',
+    icon: '📈',
+    description: 'Structural trends, factor exposures, and fundamental business quality',
+  },
+  meta: {
+    label: 'Meta / Consensus',
+    sublabel: 'Spans all horizons',
+    color: '#c084fc',
+    icon: '🔮',
+    description: 'Weighted consensus across all models — best for a complete view',
+  },
+}
+
 // ── Model selector card ───────────────────────────────────────────────────────
 
 function ModelCard({ model, selected, onToggle }) {
   const color = CATEGORY_COLOR[model.category] || 'var(--accent)'
+  const tf = TIMEFRAME_CONFIG[model.timeframe] || TIMEFRAME_CONFIG.long
   return (
     <div
       onClick={onToggle}
@@ -1132,7 +1170,7 @@ function ModelCard({ model, selected, onToggle }) {
         </span>
         <span style={{
           marginLeft: 'auto', fontSize: 10, padding: '2px 7px', borderRadius: 10,
-          background: `${color}22`, color,
+          background: `${color}22`, color, flexShrink: 0,
         }}>
           {model.category}
         </span>
@@ -1322,27 +1360,104 @@ export default function QuantWorkbench() {
         </button>
       </div>
 
-      {/* Model selector */}
+      {/* Model selector — grouped by timeframe */}
       <div style={{ marginBottom: 24 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>
-          Select Models
-          <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>
-            ({selected.length}/{models.length} selected)
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+            Select Models
+            <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>
+              ({selected.length}/{models.length} selected)
+            </span>
           </span>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            {['short', 'long', 'meta'].map(tf => {
+              const cfg = TIMEFRAME_CONFIG[tf]
+              const ids = models.filter(m => m.timeframe === tf).map(m => m.id)
+              const allSel = ids.length > 0 && ids.every(id => selected.includes(id))
+              return (
+                <button
+                  key={tf}
+                  onClick={() => {
+                    if (allSel) {
+                      setSelected(prev => prev.filter(id => !ids.includes(id)))
+                    } else {
+                      setSelected(prev => [...new Set([...prev, ...ids])])
+                    }
+                  }}
+                  style={{
+                    padding: '4px 10px', borderRadius: 6, border: `1px solid ${allSel ? cfg.color : 'var(--border)'}`,
+                    background: allSel ? `${cfg.color}20` : 'var(--surface)',
+                    color: allSel ? cfg.color : 'var(--muted)',
+                    fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  }}
+                >
+                  {cfg.icon} {cfg.label}
+                </button>
+              )
+            })}
+            <button
+              onClick={() => setSelected(models.map(m => m.id))}
+              style={{
+                padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)',
+                background: 'var(--surface)', color: 'var(--muted)',
+                fontSize: 11, fontWeight: 700, cursor: 'pointer',
+              }}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setSelected([])}
+              style={{
+                padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)',
+                background: 'var(--surface)', color: 'var(--muted)',
+                fontSize: 11, fontWeight: 700, cursor: 'pointer',
+              }}
+            >
+              None
+            </button>
+          </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {models.map(m => (
-            <ModelCard
-              key={m.id}
-              model={m}
-              selected={selected.includes(m.id)}
-              onToggle={() => toggleModel(m.id)}
-            />
-          ))}
-          {!models.length && (
-            <div style={{ color: 'var(--muted)', fontSize: 13 }}>Loading models…</div>
-          )}
-        </div>
+
+        {!models.length && (
+          <div style={{ color: 'var(--muted)', fontSize: 13 }}>Loading models…</div>
+        )}
+
+        {['short', 'long', 'meta'].map(tf => {
+          const cfg = TIMEFRAME_CONFIG[tf]
+          const group = models.filter(m => m.timeframe === tf)
+          if (!group.length) return null
+          return (
+            <div key={tf} style={{ marginBottom: 16 }}>
+              {/* Group header */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8,
+                padding: '8px 14px', borderRadius: 8,
+                background: `${cfg.color}10`, border: `1px solid ${cfg.color}30`,
+              }}>
+                <span style={{ fontSize: 16 }}>{cfg.icon}</span>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: cfg.color }}>
+                    {cfg.label}
+                    <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: `${cfg.color}99` }}>
+                      {cfg.sublabel}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{cfg.description}</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 4 }}>
+                {group.map(m => (
+                  <ModelCard
+                    key={m.id}
+                    model={m}
+                    selected={selected.includes(m.id)}
+                    onToggle={() => toggleModel(m.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          )
+        })}
       </div>
 
       {/* Error */}

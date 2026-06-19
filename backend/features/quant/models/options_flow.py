@@ -32,6 +32,7 @@ class OptionsFlowModel(QuantModel):
         "IV skew. Signals institutional directional bets in calls vs puts."
     )
     category    = "options"
+    timeframe   = "short"
 
     def analyze(self, ticker: str) -> QuantResult:
         # ── 1. Fetch unusual activity ─────────────────────────────────────────
@@ -58,6 +59,8 @@ class OptionsFlowModel(QuantModel):
                 ticker     = ticker.upper(),
                 model_id   = self.id,
                 model_name = self.name,
+            category   = self.category,
+            timeframe  = self.timeframe,
                 direction  = 0,
                 confidence = 20.0,
                 regime     = "No Unusual Activity",
@@ -205,6 +208,8 @@ class OptionsFlowModel(QuantModel):
             ticker     = ticker.upper(),
             model_id   = self.id,
             model_name = self.name,
+            category   = self.category,
+            timeframe  = self.timeframe,
             direction  = direction,
             confidence = confidence,
             regime     = regime,

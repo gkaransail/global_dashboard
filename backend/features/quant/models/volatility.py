@@ -74,6 +74,7 @@ class VolatilityRegimeModel(QuantModel):
         "vol trend (expanding/contracting), and ATR percentile."
     )
     category    = "volatility"
+    timeframe   = "short"
 
     def analyze(self, ticker: str) -> QuantResult:
         # ── 1. Fetch stock + VIX history ──────────────────────────────────────
@@ -259,6 +260,8 @@ class VolatilityRegimeModel(QuantModel):
             ticker     = ticker.upper(),
             model_id   = self.id,
             model_name = self.name,
+            category   = self.category,
+            timeframe  = self.timeframe,
             direction  = direction,
             confidence = confidence,
             regime     = regime,

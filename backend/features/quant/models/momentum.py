@@ -64,6 +64,7 @@ class MomentumModel(QuantModel):
         "and technical indicators (EMA stack, MACD, ADX, golden cross)."
     )
     category    = "momentum"
+    timeframe   = "long"
 
     def analyze(self, ticker: str) -> QuantResult:
         # ── 1. Fetch price data ───────────────────────────────────────────────
@@ -287,6 +288,8 @@ class MomentumModel(QuantModel):
             ticker     = ticker.upper(),
             model_id   = self.id,
             model_name = self.name,
+            category   = self.category,
+            timeframe  = self.timeframe,
             direction  = direction,
             confidence = confidence,
             regime     = regime,

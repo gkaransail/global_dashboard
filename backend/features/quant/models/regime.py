@@ -37,6 +37,7 @@ class RegimeDetectionModel(QuantModel):
         "Identifies Bull / Bear / Sideways market regimes and transition probabilities."
     )
     category    = "regime"
+    timeframe   = "long"
 
     def analyze(self, ticker: str) -> QuantResult:
         # ── 1. Fetch price history ────────────────────────────────────────────
@@ -189,6 +190,8 @@ class RegimeDetectionModel(QuantModel):
             ticker      = ticker.upper(),
             model_id    = self.id,
             model_name  = self.name,
+            category   = self.category,
+            timeframe  = self.timeframe,
             direction   = direction,
             confidence  = confidence,
             regime      = regime,

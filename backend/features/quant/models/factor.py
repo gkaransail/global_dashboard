@@ -70,6 +70,7 @@ class FactorModel(QuantModel):
         "size (SMB), value (HML), momentum (MOM), quality (QMJ)."
     )
     category    = "factor"
+    timeframe   = "long"
 
     def analyze(self, ticker: str) -> QuantResult:
         # ── 1. Download price data ────────────────────────────────────────────
@@ -228,6 +229,8 @@ class FactorModel(QuantModel):
             ticker     = ticker.upper(),
             model_id   = self.id,
             model_name = self.name,
+            category   = self.category,
+            timeframe  = self.timeframe,
             direction  = direction,
             confidence = confidence,
             regime     = regime,

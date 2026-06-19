@@ -36,6 +36,7 @@ class SentimentModel(QuantModel):
         "Aggregates bullish / bearish / neutral article ratios into a sentiment signal."
     )
     category    = "sentiment"
+    timeframe   = "short"
 
     def analyze(self, ticker: str) -> QuantResult:
         # ── 1. Fetch news ─────────────────────────────────────────────────────
@@ -157,6 +158,8 @@ class SentimentModel(QuantModel):
             ticker     = ticker.upper(),
             model_id   = self.id,
             model_name = self.name,
+            category   = self.category,
+            timeframe  = self.timeframe,
             direction  = direction,
             confidence = confidence,
             regime     = regime,

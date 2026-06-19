@@ -56,16 +56,206 @@ function WeightBar({ signal, weight, base, accuracy, samples }) {
 }
 
 const SOURCE_BADGE = {
-  watchlist:       { bg: 'rgba(139,92,246,0.15)', color: '#a78bfa', label: 'watchlist' },
-  top_movers:      { bg: 'rgba(245,158,11,0.15)', color: '#fbbf24', label: 'top 20' },
-  options_analysis:{ bg: 'rgba(100,116,139,0.15)', color: '#94a3b8', label: 'analysis' },
+  watchlist:        { bg: 'rgba(139,92,246,0.15)', color: '#a78bfa', label: 'watchlist' },
+  top_movers:       { bg: 'rgba(245,158,11,0.15)', color: '#fbbf24', label: 'top 20' },
+  options_analysis: { bg: 'rgba(100,116,139,0.15)', color: '#94a3b8', label: 'analysis' },
+  quant:            { bg: 'rgba(192,132,252,0.15)', color: '#c084fc', label: 'quant' },
+  leaderboard:      { bg: 'rgba(56,189,248,0.15)', color: '#38bdf8', label: 'leaderboard' },
 }
 function SourceBadge({ source }) {
-  const s = SOURCE_BADGE[source] || SOURCE_BADGE.options_analysis
+  const key = (source || '').startsWith('leaderboard') ? 'leaderboard' : source
+  const s = SOURCE_BADGE[key] || SOURCE_BADGE.options_analysis
   return (
     <span style={{ fontSize: 9, padding: '2px 5px', borderRadius: 4, background: s.bg, color: s.color, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.4px' }}>
       {s.label}
     </span>
+  )
+}
+
+// ── Signal Comparison components ──────────────────────────────────────────────
+
+const QUANT_MODEL_LABELS = {
+  regime_detection: 'Regime (HMM)',
+  momentum:         'Momentum / Trend',
+  mean_reversion:   'Mean Reversion',
+  volatility:       'Volatility',
+  factor:           'Factor Model',
+  sentiment:        'News Sentiment',
+  options_flow:     'Options Flow',
+  fundamental_health: 'Fundamental Health',
+  ensemble:         'Ensemble',
+  options:          'Options Analysis',
+}
+
+function WinRateBar({ pct, total }) {
+  const color = pct == null ? 'var(--muted)'
+              : pct >= 55   ? 'var(--bull)'
+              : pct < 45    ? 'var(--bear)'
+              : '#f59e0b'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+      <div style={{ flex: 1, height: 7, background: 'var(--surface2)', borderRadius: 4, overflow: 'hidden', minWidth: 60 }}>
+        {pct != null && (
+          <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 4, transition: 'width .4s' }} />
+        )}
+      </div>
+      <div style={{ width: 38, textAlign: 'right', fontSize: 13, fontWeight: 700, color: pct != null ? color : 'var(--muted)', flexShrink: 0 }}>
+        {pct != null ? `${pct}%` : '—'}
+      </div>
+    </div>
+  )
+}
+
+function SignalRow({ rank, s }) {
+  const isQuant = s.source === 'quant'
+  const label = QUANT_MODEL_LABELS[s.signal] || s.signal
+  return (
+    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+      <td style={{ padding: '9px 10px', color: 'var(--muted)', fontSize: 12, width: 28, textAlign: 'center', fontWeight: 600 }}>
+        {rank <= 3 ? ['🥇','🥈','🥉'][rank-1] : rank}
+      </td>
+      <td style={{ padding: '9px 10px' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{label}</div>
+        {isQuant && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{s.signal}</div>}
+      </td>
+      <td style={{ padding: '9px 10px' }}>
+        <SourceBadge source={s.source} />
+      </td>
+      <td style={{ padding: '9px 10px', minWidth: 140 }}>
+        <WinRateBar pct={s.win_rate_pct} />
+      </td>
+      <td style={{ padding: '9px 10px', textAlign: 'right', fontSize: 12, color: s.bull_win_rate >= 55 ? 'var(--bull)' : s.bull_win_rate != null ? 'var(--text)' : 'var(--muted)' }}>
+        {s.bull_win_rate != null ? `${s.bull_win_rate}%` : '—'}
+      </td>
+      <td style={{ padding: '9px 10px', textAlign: 'right', fontSize: 12, color: s.bear_win_rate >= 55 ? 'var(--bull)' : s.bear_win_rate != null ? 'var(--text)' : 'var(--muted)' }}>
+        {s.bear_win_rate != null ? `${s.bear_win_rate}%` : '—'}
+      </td>
+      <td style={{ padding: '9px 10px', textAlign: 'right', fontSize: 12, fontWeight: s.avg_return != null ? 700 : 400,
+        color: s.avg_return != null ? (s.avg_return > 0 ? 'var(--bull)' : s.avg_return < 0 ? 'var(--bear)' : 'var(--muted)') : 'var(--muted)' }}>
+        {s.avg_return != null ? `${s.avg_return > 0 ? '+' : ''}${s.avg_return}%` : '—'}
+      </td>
+      <td style={{ padding: '9px 10px', textAlign: 'right', fontSize: 12, color: 'var(--muted)' }}>
+        <span style={{ color: 'var(--text)', fontWeight: 600 }}>{s.evaluated}</span>
+        {s.pending > 0 && <span style={{ fontSize: 10, marginLeft: 4 }}>+{s.pending} pend.</span>}
+      </td>
+    </tr>
+  )
+}
+
+function ComparePanel({ running, onScanQuant }) {
+  const [signals,  setSignals]  = useState(null)
+  const [loading,  setLoading]  = useState(false)
+  const [msg,      setMsg]      = useState(null)
+
+  async function load() {
+    setLoading(true)
+    try {
+      const r = await api.get('/backtest/compare')
+      setSignals(r.signals || [])
+    } catch (e) { setMsg({ type: 'error', text: e.message }) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { load() }, [])
+
+  const ranked = (signals || []).filter(s => s.evaluated > 0)
+  const pending = (signals || []).filter(s => s.evaluated === 0)
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div>
+        <div className="section-title" style={{ fontSize: 13, marginBottom: 4 }}>🏆 Signal Accuracy Comparison</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+          Every quant model run and options analysis is logged as a prediction. After the evaluation window passes,
+          outcomes are scored. Ranked by win rate — minimum 5 evaluated predictions to appear.
+        </div>
+      </div>
+
+      {msg && (
+        <div style={{ padding: '8px 12px', borderRadius: 7, fontSize: 12,
+          background: msg.type === 'ok' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+          border: `1px solid ${msg.type === 'ok' ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+          color: msg.type === 'ok' ? 'var(--bull)' : 'var(--bear)' }}>
+          {msg.text}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button
+          onClick={async () => { setMsg(null); await onScanQuant(); load() }}
+          disabled={running}
+          style={{ padding: '6px 14px', borderRadius: 7, background: '#7c3aed', color: '#fff', border: 'none', fontSize: 12, fontWeight: 700, cursor: running ? 'not-allowed' : 'pointer', opacity: running ? 0.6 : 1 }}
+        >
+          🧮 Scan Watchlist with Quant Models
+        </button>
+        <button onClick={load} disabled={loading} style={{ padding: '6px 12px', borderRadius: 7, background: 'var(--surface2)', color: 'var(--text)', border: '1px solid var(--border)', fontSize: 12, cursor: 'pointer' }}>
+          ↻ Refresh
+        </button>
+        <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>
+          {signals != null ? `${signals.length} signals tracked` : ''}
+        </span>
+      </div>
+
+      {loading && <div style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</div>}
+
+      {signals != null && ranked.length === 0 && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '28px 22px', textAlign: 'center' }}>
+          <div style={{ fontSize: 28, marginBottom: 10 }}>📊</div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>No evaluated predictions yet</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', maxWidth: 440, margin: '0 auto', lineHeight: 1.6 }}>
+            Predictions are logged automatically each time you run a quant model or view options analysis.
+            After the evaluation window passes (7 days for short-term, 30 days for long-term), click
+            <strong> Evaluate Matured</strong> to score outcomes and see rankings here.
+          </div>
+          <div style={{ marginTop: 14, fontSize: 12, color: '#a78bfa' }}>
+            💡 To generate predictions now: add tickers to your watchlist, then click <strong>Scan Watchlist with Quant Models</strong> above.
+          </div>
+          {pending.length > 0 && (
+            <div style={{ marginTop: 14, fontSize: 12, color: '#f59e0b' }}>
+              ⏳ {pending.length} signal{pending.length > 1 ? 's' : ''} have pending predictions — check back after their evaluation windows pass.
+            </div>
+          )}
+        </div>
+      )}
+
+      {ranked.length > 0 && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.4px', background: 'var(--surface2)', borderBottom: '1px solid var(--border)' }}>
+                <th style={{ padding: '7px 10px', width: 28 }}>#</th>
+                <th style={{ padding: '7px 10px', textAlign: 'left' }}>Signal / Model</th>
+                <th style={{ padding: '7px 10px', textAlign: 'left' }}>Type</th>
+                <th style={{ padding: '7px 10px', textAlign: 'left', minWidth: 140 }}>Win Rate</th>
+                <th style={{ padding: '7px 10px', textAlign: 'right' }}>Bull%</th>
+                <th style={{ padding: '7px 10px', textAlign: 'right' }}>Bear%</th>
+                <th style={{ padding: '7px 10px', textAlign: 'right' }}>Avg Ret.</th>
+                <th style={{ padding: '7px 10px', textAlign: 'right' }}>Predictions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ranked.map((s, i) => <SignalRow key={s.signal} rank={i + 1} s={s} />)}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Pending signals (collecting data) */}
+      {pending.length > 0 && ranked.length > 0 && (
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>⏳ Collecting predictions (no outcomes yet)</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {pending.map(s => (
+              <div key={s.signal} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '7px 12px', fontSize: 12 }}>
+                <span style={{ fontWeight: 600 }}>{QUANT_MODEL_LABELS[s.signal] || s.signal}</span>
+                <span style={{ color: 'var(--muted)', marginLeft: 8 }}>{s.total} pending</span>
+                <SourceBadge source={s.source} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -295,7 +485,7 @@ function BacktestDashboard() {
   const [weights,  setWeights]  = useState([])
   const [preds,    setPreds]    = useState([])
   const [pending,  setPending]  = useState([])
-  const [tab,      setTab]      = useState('pending')
+  const [tab,      setTab]      = useState('compare')
   const [loading,  setLoading]  = useState(false)
   const [running,  setRunning]  = useState(false)
   const [msg,      setMsg]      = useState(null)
@@ -343,6 +533,16 @@ function BacktestDashboard() {
       const r = await api.post('/backtest/force-evaluate', {})
       setMsg({ type: 'ok', text: `Force-evaluated ${r.evaluated} predictions. ${r.errors} errors.` })
       setTab('evaluated')
+      await loadAll()
+    } catch (e) { setMsg({ type: 'error', text: e.message }) }
+    finally { setRunning(false) }
+  }
+
+  async function runScanQuant() {
+    setRunning(true); setMsg(null)
+    try {
+      const r = await api.post('/backtest/scan-quant', {})
+      setMsg({ type: 'ok', text: `Quant scan complete: ${r.scanned} predictions logged, ${r.skipped} skipped (already logged today or neutral). ${r.errors?.length || 0} errors.` })
       await loadAll()
     } catch (e) { setMsg({ type: 'error', text: e.message }) }
     finally { setRunning(false) }
@@ -495,18 +695,20 @@ function BacktestDashboard() {
         </div>
       )}
 
-      {/* Predictions table */}
+      {/* Main tabs */}
       <div>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
-          <div className="section-title" style={{ margin: 0, fontSize: 13 }}>Prediction Log</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="section-title" style={{ margin: 0, fontSize: 13 }}>Analysis</div>
           <div style={{ display: 'flex', gap: 6, marginLeft: 12 }}>
-            {['evaluated', 'pending'].map(t => (
-              <button key={t} onClick={() => setTab(t)} style={btnStyle(tab === t)}>
-                {t === 'evaluated' ? `Evaluated (${preds.length})` : `Pending (${pending.length})`}
-              </button>
-            ))}
+            <button onClick={() => setTab('compare')} style={btnStyle(tab === 'compare')}>🏆 Signal Comparison</button>
+            <button onClick={() => setTab('evaluated')} style={btnStyle(tab === 'evaluated')}>Evaluated ({preds.length})</button>
+            <button onClick={() => setTab('pending')} style={btnStyle(tab === 'pending')}>Pending ({pending.length})</button>
           </div>
         </div>
+
+        {tab === 'compare' && (
+          <ComparePanel running={running} onScanQuant={runScanQuant} />
+        )}
 
         {tab === 'evaluated' && (
           preds.length === 0

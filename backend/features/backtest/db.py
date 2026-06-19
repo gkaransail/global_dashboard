@@ -210,6 +210,52 @@ def get_stats() -> dict:
     }
 
 
+# ── Signal Comparison (all sources) ──────────────────────────────────────────
+
+def get_all_source_stats() -> list[dict]:
+    """Win rate per feature/model across ALL prediction sources, ranked by win rate."""
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                COALESCE(NULLIF(feature, ''), source)                                as signal_key,
+                source,
+                feature,
+                COUNT(*)                                                              as total,
+                SUM(CASE WHEN evaluated=1 THEN 1 ELSE 0 END)                         as evaluated,
+                SUM(CASE WHEN correct=1  THEN 1 ELSE 0 END)                          as correct,
+                SUM(CASE WHEN evaluated=1 AND direction=1  THEN 1 ELSE 0 END)         as bull_eval,
+                SUM(CASE WHEN correct=1  AND direction=1  THEN 1 ELSE 0 END)          as bull_wins,
+                SUM(CASE WHEN evaluated=1 AND direction=-1 THEN 1 ELSE 0 END)         as bear_eval,
+                SUM(CASE WHEN correct=1  AND direction=-1 THEN 1 ELSE 0 END)          as bear_wins,
+                AVG(CASE WHEN evaluated=1 AND direction!=0
+                         THEN actual_return_pct * direction ELSE NULL END)            as avg_directional_return
+            FROM predictions
+            GROUP BY COALESCE(NULLIF(feature, ''), source), source
+            ORDER BY evaluated DESC, total DESC
+        """).fetchall()
+    out = []
+    for r in rows:
+        ev      = r["evaluated"] or 0
+        correct = r["correct"]   or 0
+        b_eval  = r["bull_eval"] or 0
+        e_eval  = r["bear_eval"] or 0
+        out.append({
+            "signal":        r["signal_key"],
+            "source":        r["source"],
+            "feature":       r["feature"],
+            "total":         r["total"],
+            "evaluated":     ev,
+            "pending":       r["total"] - ev,
+            "win_rate_pct":  round(correct / ev * 100, 1) if ev > 0 else None,
+            "bull_win_rate": round(r["bull_wins"] / b_eval * 100, 1) if b_eval > 0 else None,
+            "bear_win_rate": round(r["bear_wins"] / e_eval * 100, 1) if e_eval > 0 else None,
+            "avg_return":    round(r["avg_directional_return"], 2) if r["avg_directional_return"] is not None else None,
+        })
+    # Sort: signals with evaluated predictions first, then by win_rate desc
+    out.sort(key=lambda x: (-(x["evaluated"] or 0), -(x["win_rate_pct"] or 0)))
+    return out
+
+
 # ── Leaderboard ───────────────────────────────────────────────────────────────
 
 def get_feature_stats() -> list[dict]:

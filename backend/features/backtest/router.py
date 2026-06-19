@@ -92,6 +92,84 @@ def reset_weights():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Signal Comparison ────────────────────────────────────────────────────────
+
+@router.get("/compare")
+def compare():
+    """Signal accuracy leaderboard — all features and quant models ranked by win rate."""
+    try:
+        db.init_db()
+        return {"signals": db.get_all_source_stats()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/scan-quant")
+def scan_quant():
+    """
+    Run all quant models on each watchlist ticker and log predictions.
+    Skips neutral signals (direction=0) and duplicate same-day logs.
+    """
+    from features.quant.registry import REGISTRY, list_models as quant_models
+    import yfinance as yf
+    from datetime import date, timedelta, datetime as dt, timezone
+
+    db.init_db()
+    tickers = db.get_watchlist()
+    if not tickers:
+        return {"scanned": 0, "errors": [], "message": "Watchlist is empty — add tickers first"}
+
+    model_ids = [m["id"] for m in quant_models() if m["id"] != "ensemble"]  # skip ensemble (meta-model)
+    today     = date.today().isoformat()
+    scanned   = 0
+    skipped   = 0
+    errors    = []
+
+    def _spot(ticker):
+        try:
+            return float(yf.Ticker(ticker).fast_info.last_price or 0) or None
+        except Exception:
+            return None
+
+    for ticker in tickers:
+        spot = _spot(ticker)
+        for model_id in model_ids:
+            # Duplicate guard
+            with db._conn() as conn:
+                if conn.execute(
+                    "SELECT id FROM predictions WHERE ticker=? AND feature=? AND source='quant' AND DATE(predicted_at)=? LIMIT 1",
+                    (ticker, model_id, today)
+                ).fetchone():
+                    skipped += 1
+                    continue
+            try:
+                result = REGISTRY[model_id].analyze(ticker)
+                if result.direction == 0:
+                    skipped += 1
+                    continue
+                tf        = result.timeframe or "long"
+                eval_days = {"short": 7, "long": 30, "meta": 21}.get(tf, 14)
+                db.insert_prediction({
+                    "ticker":             ticker,
+                    "timeframe":          tf,
+                    "predicted_at":       dt.now(timezone.utc).isoformat(),
+                    "direction":          result.direction,
+                    "score":              round(result.confidence / 100 * result.direction, 3),
+                    "spot_at_prediction": spot,
+                    "evaluate_after":     (date.today() + timedelta(days=eval_days)).isoformat(),
+                    "source":             "quant",
+                    "feature":            model_id,
+                })
+                scanned += 1
+            except Exception as e:
+                errors.append({"ticker": ticker, "model": model_id, "error": str(e)})
+
+    return {
+        "scanned": scanned, "skipped": skipped,
+        "errors": errors[:20], "tickers": tickers, "models": model_ids,
+    }
+
+
 # ── Watchlist ─────────────────────────────────────────────────────────────────
 
 @router.get("/watchlist")

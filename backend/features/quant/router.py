@@ -27,6 +27,52 @@ def _cache_set(ticker: str, model_id: str, result: dict):
     _CACHE[(ticker, model_id)] = (result, datetime.utcnow() + _TTL)
 
 
+# ── Prediction logging ────────────────────────────────────────────────────────
+
+def _log_quant_prediction(result: dict):
+    """Silently log a non-neutral quant result as a backtest prediction (once per day per ticker+model)."""
+    try:
+        if result.get("error") or result.get("direction", 0) == 0:
+            return
+        import yfinance as yf
+        from datetime import date, timedelta, datetime as dt, timezone
+        from features.backtest.db import init_db, _conn, insert_prediction
+
+        init_db()
+        ticker   = result["ticker"]
+        model_id = result["model_id"]
+        tf       = result.get("timeframe", "long")
+        today    = date.today().isoformat()
+
+        with _conn() as conn:
+            if conn.execute(
+                "SELECT id FROM predictions WHERE ticker=? AND feature=? AND source='quant' AND DATE(predicted_at)=? LIMIT 1",
+                (ticker, model_id, today)
+            ).fetchone():
+                return  # already logged today
+
+        try:
+            spot = float(yf.Ticker(ticker).fast_info.last_price or 0) or None
+        except Exception:
+            spot = None
+
+        eval_days = {"short": 7, "long": 30, "meta": 21}.get(tf, 14)
+        insert_prediction({
+            "ticker":             ticker,
+            "timeframe":          tf,
+            "predicted_at":       dt.now(timezone.utc).isoformat(),
+            "direction":          result["direction"],
+            "score":              round(result.get("confidence", 50) / 100 * result["direction"], 3),
+            "spot_at_prediction": spot,
+            "evaluate_after":     (date.today() + timedelta(days=eval_days)).isoformat(),
+            "source":             "quant",
+            "feature":            model_id,
+        })
+        logger.debug(f"Logged quant prediction: {ticker} {model_id} dir={result['direction']}")
+    except Exception as e:
+        logger.debug(f"Quant prediction log failed: {e}")
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("/models")
@@ -65,6 +111,7 @@ def analyze(
             d = result.to_dict()
             _cache_set(ticker, mid, d)
             results.append(d)
+            _log_quant_prediction(d)   # fire-and-forget backtest logging
         except Exception as e:
             logger.error(f"Quant model {mid} failed for {ticker}: {e}")
             results.append({

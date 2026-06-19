@@ -1,4 +1,5 @@
 // section: groups features in the sidebar under a labelled header
+// timeframe: 'short' | 'medium' | 'long' | 'meta'
 export const FEATURES = [
   // ── ANALYSIS ──────────────────────────────────────────────────────────────
   {
@@ -7,6 +8,7 @@ export const FEATURES = [
     icon: '🔄',
     status: 'live',
     section: 'analysis',
+    timeframe: 'short',
     description: 'Multi-factor reversal signal engine.',
     subOptions: [
       { id: 'analyze',   label: '🔍 Single Stock', icon: '🔍', path: '/reversal/analyze' },
@@ -21,6 +23,7 @@ export const FEATURES = [
     icon: '📈',
     status: 'live',
     section: 'analysis',
+    timeframe: 'short',
     description: 'Chart patterns, support/resistance, momentum signals.',
     subOptions: [
       { id: 'indicators', label: '📊 Indicators',         icon: '📊', path: '/technical/indicators' },
@@ -35,6 +38,7 @@ export const FEATURES = [
     icon: '🏦',
     status: 'live',
     section: 'analysis',
+    timeframe: 'long',
     description: 'Valuation ratios, growth scores, financial health.',
     subOptions: [
       { id: 'valuation', label: '💹 Valuation',     icon: '💹', path: '/fundamental/valuation' },
@@ -49,6 +53,7 @@ export const FEATURES = [
     icon: '⛓',
     status: 'live',
     section: 'analysis',
+    timeframe: 'short',
     description: 'Live options chain, Greeks, IV skew, unusual activity, Top 20 scanner.',
     subOptions: [
       { id: 'overview', label: '🏠 Overview',         icon: '🏠', path: '/options/overview' },
@@ -66,6 +71,7 @@ export const FEATURES = [
     icon: '📅',
     status: 'live',
     section: 'market',
+    timeframe: 'medium',
     description: 'Upcoming earnings with expected moves and EPS history.',
     subOptions: [
       { id: 'calendar', label: '📅 Calendar',          icon: '📅', path: '/earnings/calendar' },
@@ -78,6 +84,7 @@ export const FEATURES = [
     icon: '🧠',
     status: 'live',
     section: 'market',
+    timeframe: 'short',
     description: 'Fear & Greed index from VIX, momentum, PCR, safe haven demand, junk bonds, breadth.',
     subOptions: [
       { id: 'dashboard', label: '🧠 Dashboard', icon: '🧠', path: '/sentiment/dashboard' },
@@ -89,6 +96,7 @@ export const FEATURES = [
     icon: '📰',
     status: 'live',
     section: 'market',
+    timeframe: 'short',
     description: 'FinBERT-powered sentiment analysis on stock news headlines and custom text.',
     subOptions: [
       { id: 'news',    label: '📰 News Feed',     icon: '📰', path: '/sentiment_ai/news' },
@@ -104,6 +112,7 @@ export const FEATURES = [
     icon: '👁',
     status: 'live',
     section: 'smart_data',
+    timeframe: 'medium',
     description: 'SEC Form 4 insider buying and selling — open market purchases and cluster signals.',
     subOptions: [
       { id: 'feed',    label: '📋 Transaction Feed', icon: '📋', path: '/insider/feed' },
@@ -116,6 +125,7 @@ export const FEATURES = [
     icon: '🏛',
     status: 'live',
     section: 'smart_data',
+    timeframe: 'medium',
     description: 'Congressional stock trades — STOCK Act disclosures from House and Senate members.',
     subOptions: [
       { id: 'feed',    label: '📋 Trade Feed',  icon: '📋', path: '/congress/feed' },
@@ -129,6 +139,7 @@ export const FEATURES = [
     icon: '🏢',
     status: 'live',
     section: 'smart_data',
+    timeframe: 'long',
     description: 'Institutional ownership from 13F filings — top holders, position changes, fund flow.',
     subOptions: [
       { id: 'holders',  label: '🏢 Top Holders', icon: '🏢', path: '/institutional/holders' },
@@ -144,6 +155,7 @@ export const FEATURES = [
     icon: '🎯',
     status: 'live',
     section: 'rankings',
+    timeframe: 'short',
     description: 'Multi-factor stock rankings — options flow, smart money, insider, and market overview.',
     subOptions: [
       { id: 'scan',        label: '🎯 Ranked Picks',    icon: '🎯', path: '/market_intel/scan' },
@@ -157,6 +169,7 @@ export const FEATURES = [
     icon: '🔭',
     status: 'live',
     section: 'rankings',
+    timeframe: 'medium',
     description: 'Unified screener combining technical, fundamental, smart money, and sentiment signals.',
     subOptions: [
       { id: 'screen',    label: '🔭 Screener',    icon: '🔭', path: '/screener/screen' },
@@ -172,6 +185,7 @@ export const FEATURES = [
     icon: '🧠',
     status: 'live',
     section: 'ai',
+    timeframe: 'medium',
     description: 'Track options signal predictions, evaluate outcomes, and use RL to optimize signal weights.',
     subOptions: [
       { id: 'dashboard', label: '🧠 Dashboard', icon: '🧠', path: '/backtest/dashboard' },
@@ -183,6 +197,7 @@ export const FEATURES = [
     icon: '🧮',
     status: 'live',
     section: 'ai',
+    timeframe: 'meta',
     description: 'Apply quantitative models (regime detection, momentum, mean reversion) to any stock.',
     subOptions: [
       { id: 'analyze', label: '🧮 Model Workbench', icon: '🧮', path: '/quant' },
@@ -194,6 +209,7 @@ export const FEATURES = [
     icon: '🏆',
     status: 'live',
     section: 'ai',
+    timeframe: 'medium',
     description: 'Compare weekly/monthly Top-20 picks from Options, Technical, Insider, and Institutional signals.',
     subOptions: [
       { id: 'results',    label: '🏆 Results',    icon: '🏆', path: '/leaderboard' },
@@ -209,6 +225,7 @@ export const FEATURES = [
     icon: '🤖',
     status: 'live',
     section: 'ai',
+    timeframe: 'meta',
     description: 'AI-powered research — summaries, deep analysis, interactive chat, Bull vs Bear debate.',
     subOptions: [
       { id: 'summary',  label: '📝 AI Summary',   icon: '📝', path: '/ai_agent/summary' },
@@ -225,6 +242,7 @@ export const FEATURES = [
     icon: '💼',
     status: 'live',
     section: 'portfolio',
+    timeframe: 'long',
     description: 'Track positions, cost basis, unrealized P&L, and portfolio allocation.',
     subOptions: [
       { id: 'holdings', label: '💼 Holdings',    icon: '💼', path: '/portfolio/holdings' },
@@ -237,6 +255,7 @@ export const FEATURES = [
     icon: '🔔',
     status: 'live',
     section: 'portfolio',
+    timeframe: 'short',
     description: 'Price alerts and watchlist with signal notifications.',
     subOptions: [
       { id: 'watchlist', label: '👁 Watchlist',    icon: '👁', path: '/alerts/watchlist' },
@@ -252,4 +271,11 @@ export const SECTION_LABELS = {
   rankings:   'Rankings',
   ai:         'AI',
   portfolio:  'Portfolio',
+}
+
+export const TIMEFRAME_META = {
+  short:  { label: 'Short',  sublabel: 'Days–2 weeks',  color: '#f59e0b', icon: '⚡' },
+  medium: { label: 'Medium', sublabel: '2 weeks–3 months', color: '#38bdf8', icon: '🕐' },
+  long:   { label: 'Long',   sublabel: 'Months–years',  color: '#34d399', icon: '📅' },
+  meta:   { label: 'Meta',   sublabel: 'All horizons',  color: '#c084fc', icon: '🔮' },
 }

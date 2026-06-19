@@ -1,6 +1,6 @@
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useState } from 'react'
-import { FEATURES, SECTION_LABELS } from '../features'
+import { FEATURES, SECTION_LABELS, TIMEFRAME_META } from '../features'
 
 let _globalCollapsed = false
 
@@ -16,7 +16,13 @@ function getSections(features) {
   return order.map(s => ({ key: s, label: SECTION_LABELS[s] || s, features: map[s] }))
 }
 
-const SECTIONS = getSections(FEATURES)
+const TIMEFRAME_FILTERS = [
+  { key: 'all',    label: 'All',    icon: null },
+  { key: 'short',  label: 'Short',  icon: '⚡' },
+  { key: 'medium', label: 'Mid',    icon: '🕐' },
+  { key: 'long',   label: 'Long',   icon: '📅' },
+  { key: 'meta',   label: 'Meta',   icon: '🔮' },
+]
 
 export default function Sidebar() {
   const location = useLocation()
@@ -24,6 +30,7 @@ export default function Sidebar() {
   const activeFeature = FEATURES.find(f => location.pathname.startsWith(`/${f.id}`))
   const [expanded, setExpanded] = useState(activeFeature?.id ?? null)
   const [collapsed, setCollapsed] = useState(_globalCollapsed)
+  const [timeframeFilter, setTimeframeFilter] = useState('all')
 
   function toggleCollapse() {
     _globalCollapsed = !collapsed
@@ -89,9 +96,35 @@ export default function Sidebar() {
       {/* Divider */}
       {!collapsed && <div style={{ height: 1, background: 'var(--border)', margin: '0 12px 4px' }} />}
 
+      {/* Timeframe filter tabs */}
+      {!collapsed && (
+        <div style={{ display: 'flex', gap: 3, padding: '6px 10px 2px', flexWrap: 'wrap' }}>
+          {TIMEFRAME_FILTERS.map(tf => {
+            const isActive = timeframeFilter === tf.key
+            const color = tf.key === 'all' ? 'var(--accent-hi)' : TIMEFRAME_META[tf.key]?.color
+            return (
+              <button
+                key={tf.key}
+                onClick={() => setTimeframeFilter(tf.key)}
+                style={{
+                  flex: 1, minWidth: 0, padding: '3px 4px', borderRadius: 6, border: 'none',
+                  cursor: 'pointer', fontSize: 10, fontWeight: isActive ? 700 : 400,
+                  background: isActive ? (tf.key === 'all' ? 'rgba(99,102,241,0.15)' : `${color}22`) : 'transparent',
+                  color: isActive ? color : 'var(--muted)',
+                  transition: 'all 0.15s',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {tf.icon ? `${tf.icon} ${tf.label}` : tf.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {/* Feature nav — grouped by section */}
       <div className="sidebar-section" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-        {SECTIONS.map(({ key, label, features }) => (
+        {getSections(timeframeFilter === 'all' ? FEATURES : FEATURES.filter(f => f.timeframe === timeframeFilter)).map(({ key, label, features }) => (
           <div key={key}>
             {/* Section header */}
             {!collapsed && (
@@ -117,7 +150,17 @@ export default function Sidebar() {
                     title={collapsed ? feature.label : undefined}
                     style={{ justifyContent: collapsed ? 'center' : 'flex-start', paddingLeft: collapsed ? 0 : undefined }}
                   >
-                    <span className="sidebar-feature-icon" style={{ fontSize: 15 }}>{feature.icon}</span>
+                    <span style={{ position: 'relative', flexShrink: 0 }}>
+                      <span className="sidebar-feature-icon" style={{ fontSize: 15 }}>{feature.icon}</span>
+                      {feature.timeframe && (
+                        <span style={{
+                          position: 'absolute', bottom: -1, right: -3,
+                          width: 5, height: 5, borderRadius: '50%',
+                          background: TIMEFRAME_META[feature.timeframe]?.color ?? 'var(--muted)',
+                          border: '1px solid var(--bg)',
+                        }} />
+                      )}
+                    </span>
                     {!collapsed && (
                       <>
                         <span className="sidebar-feature-label">{feature.label}</span>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from '../../core/api'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -1153,15 +1153,32 @@ export default function QuantWorkbench() {
   const [loading, setLoading]       = useState(false)
   const [error, setError]           = useState(null)
 
+  // Search / autocomplete state
+  const [suggestions, setSuggestions] = useState([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [searchLoading, setSearchLoading] = useState(false)
+  const searchTimer = useRef(null)
+  const wrapperRef = useRef(null)
+
   // Load available models on mount
   useEffect(() => {
     api.get('/quant/models')
       .then(r => {
         setModels(r.models || [])
-        // Default: select all
         setSelected((r.models || []).map(m => m.id))
       })
       .catch(() => {})
+  }, [])
+
+  // Close suggestions on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setShowSuggestions(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
   }, [])
 
   const toggleModel = (id) => {
@@ -1170,10 +1187,12 @@ export default function QuantWorkbench() {
     )
   }
 
-  const run = async () => {
-    const t = inputVal.trim().toUpperCase()
+  const run = async (tickerOverride) => {
+    const t = (tickerOverride || inputVal).trim().toUpperCase()
     if (!t || !selected.length) return
     setTicker(t)
+    setInputVal(t)
+    setShowSuggestions(false)
     setLoading(true)
     setError(null)
     setResults([])
@@ -1187,7 +1206,41 @@ export default function QuantWorkbench() {
     }
   }
 
-  const handleKey = (e) => { if (e.key === 'Enter') run() }
+  const handleInputChange = (e) => {
+    const val = e.target.value
+    setInputVal(val)
+
+    clearTimeout(searchTimer.current)
+    if (val.trim().length < 1) {
+      setSuggestions([])
+      setShowSuggestions(false)
+      return
+    }
+
+    searchTimer.current = setTimeout(async () => {
+      setSearchLoading(true)
+      try {
+        const r = await api.get(`/quant/search?q=${encodeURIComponent(val.trim())}`)
+        setSuggestions(r.results || [])
+        setShowSuggestions((r.results || []).length > 0)
+      } catch {
+        setSuggestions([])
+      } finally {
+        setSearchLoading(false)
+      }
+    }, 300)
+  }
+
+  const handleKey = (e) => {
+    if (e.key === 'Enter') { run(); setShowSuggestions(false) }
+    if (e.key === 'Escape') setShowSuggestions(false)
+  }
+
+  const pickSuggestion = (sym) => {
+    setInputVal(sym)
+    setShowSuggestions(false)
+    run(sym)
+  }
 
   return (
     <div style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
@@ -1199,27 +1252,70 @@ export default function QuantWorkbench() {
         </p>
       </div>
 
-      {/* Stock input */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 24, alignItems: 'center' }}>
-        <input
-          value={inputVal}
-          onChange={e => setInputVal(e.target.value.toUpperCase())}
-          onKeyDown={handleKey}
-          placeholder="Enter ticker — e.g. NVDA"
-          style={{
-            flex: 1, padding: '10px 16px', borderRadius: 8, fontSize: 15, fontWeight: 600,
-            border: '1px solid var(--border)', background: 'var(--surface)',
-            color: 'var(--text)', outline: 'none', letterSpacing: '.5px',
-          }}
-        />
+      {/* Stock input with autocomplete */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 24, alignItems: 'flex-start' }}>
+        <div ref={wrapperRef} style={{ flex: 1, position: 'relative' }}>
+          <input
+            value={inputVal}
+            onChange={handleInputChange}
+            onKeyDown={handleKey}
+            onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+            placeholder="Search by ticker or company name — e.g. NVDA or Nvidia"
+            style={{
+              width: '100%', padding: '10px 16px', borderRadius: 8, fontSize: 15, fontWeight: 600,
+              border: `1px solid ${showSuggestions ? 'var(--accent)' : 'var(--border)'}`,
+              background: 'var(--surface)', color: 'var(--text)', outline: 'none',
+              letterSpacing: '.3px', boxSizing: 'border-box',
+            }}
+          />
+          {searchLoading && (
+            <div style={{
+              position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+              fontSize: 12, color: 'var(--muted)',
+            }}>searching…</div>
+          )}
+          {showSuggestions && suggestions.length > 0 && (
+            <div style={{
+              position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+              background: 'var(--surface)', border: '1px solid var(--accent)',
+              borderRadius: 10, zIndex: 100, overflow: 'hidden',
+              boxShadow: '0 8px 24px #00000040',
+            }}>
+              {suggestions.map((s, i) => (
+                <div
+                  key={i}
+                  onMouseDown={() => pickSuggestion(s.symbol)}
+                  style={{
+                    padding: '10px 14px', cursor: 'pointer', display: 'flex',
+                    alignItems: 'center', gap: 12,
+                    borderBottom: i < suggestions.length - 1 ? '1px solid var(--border)' : 'none',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--accent)', minWidth: 56 }}>
+                    {s.symbol}
+                  </span>
+                  <span style={{ fontSize: 13, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.name}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0 }}>
+                    {s.exchange}{s.sector ? ` · ${s.sector}` : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <button
-          onClick={run}
+          onClick={() => run()}
           disabled={loading || !inputVal.trim() || !selected.length}
           style={{
             padding: '10px 24px', borderRadius: 8, border: 'none',
             background: loading ? 'var(--surface2)' : 'var(--accent)',
             color: loading ? 'var(--muted)' : '#000',
             fontWeight: 700, fontSize: 14, cursor: loading ? 'wait' : 'pointer',
+            flexShrink: 0,
           }}
         >
           {loading ? '⏳ Running…' : '▶ Analyze'}

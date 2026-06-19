@@ -77,6 +77,32 @@ def analyze(
     return {"ticker": ticker, "results": results}
 
 
+@router.get("/search")
+def search_ticker(q: str = Query(..., min_length=1, description="Company name or ticker")):
+    """
+    Search for tickers by name or symbol.
+    Returns up to 8 equity matches with symbol, name, exchange, and sector.
+    """
+    import yfinance as yf
+    try:
+        results = yf.Search(q.strip(), max_results=10)
+        quotes = [
+            {
+                "symbol":   r.get("symbol", ""),
+                "name":     r.get("longname") or r.get("shortname", ""),
+                "exchange": r.get("exchDisp", ""),
+                "sector":   r.get("sectorDisp", ""),
+                "type":     r.get("quoteType", ""),
+            }
+            for r in (results.quotes or [])
+            if r.get("quoteType") == "EQUITY" and r.get("symbol")
+        ][:8]
+        return {"results": quotes}
+    except Exception as e:
+        logger.warning(f"Ticker search failed for '{q}': {e}")
+        return {"results": []}
+
+
 @router.delete("/cache")
 def clear_cache():
     """Clear the result cache (useful during development)."""

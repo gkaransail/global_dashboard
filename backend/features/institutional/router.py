@@ -27,9 +27,10 @@ async def flow(ticker: str):
 async def screener(
     min_inst_pct: float = Query(50.0, description="Minimum % institutionally held"),
     flow: str = Query("all", description="Filter by flow: all | accumulating | distributing"),
+    days: int = Query(365, ge=30, le=730, description="Only include stocks with filings within this many days"),
 ):
-    """Screen stocks by institutional ownership level and accumulation/distribution trend."""
+    """Screen stocks by institutional ownership level, flow trend, and filing recency."""
     try:
-        return {"results": run_screener(min_inst_pct, flow)}
+        return {"results": run_screener(min_inst_pct, flow, days)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

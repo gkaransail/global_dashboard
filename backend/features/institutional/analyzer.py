@@ -151,22 +151,34 @@ def _classify_action(pct_change: float) -> str:
     return "holding"
 
 
+from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+from datetime import date as _date, timedelta as _timedelta
+
 SCREENER_UNIVERSE = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA",
-    "AMD", "AVGO", "QCOM", "JPM", "BAC", "GS", "V", "MA",
-    "JNJ", "LLY", "UNH", "ABBV", "XOM", "CVX", "HD", "COST",
-    "WMT", "MCD", "NKE", "NFLX", "CRM", "ORCL", "NOW",
+    "AMD", "INTC", "QCOM", "AVGO", "MU", "AMAT", "KLAC",
+    "CRM", "ORCL", "NOW", "ADBE", "PLTR", "SNOW",
+    "JPM", "BAC", "GS", "MS", "WFC", "C", "BLK", "V", "MA", "AXP",
+    "JNJ", "PFE", "ABBV", "UNH", "LLY", "AMGN", "GILD", "MRNA",
+    "XOM", "CVX", "COP", "SLB", "OXY",
+    "HD", "MCD", "COST", "TGT", "WMT", "NKE", "SBUX",
+    "BA", "CAT", "GE", "HON", "LMT", "RTX",
+    "NFLX", "DIS", "SPOT",
+    "F", "GM", "RIVN",
+    "COIN", "MSTR", "UBER", "ABNB", "SHOP", "PYPL",
 ]
 
 
-def run_screener(min_inst_pct: float = 50.0, flow: str = "all") -> list[dict]:
-    cache_key = f"institutional_screener_{min_inst_pct}_{flow}"
+def run_screener(min_inst_pct: float = 50.0, flow: str = "all", days: int = 365) -> list[dict]:
+    cache_key = f"institutional_screener_{min_inst_pct}_{flow}_{days}"
     cached = _cache.get(cache_key, CACHE_TTL)
     if cached:
         return cached
 
+    cutoff = (_date.today() - _timedelta(days=days)).isoformat()
     results = []
-    for ticker in SCREENER_UNIVERSE:
+
+    def _check(ticker: str):
         try:
             data = get_holders(ticker)
             inst_pct = data["ownership"]["institutional_pct"]
@@ -174,22 +186,38 @@ def run_screener(min_inst_pct: float = 50.0, flow: str = "all") -> list[dict]:
             net_flow = data["flow"]["net_flow"]
 
             if inst_pct < min_inst_pct:
-                continue
+                return None
             if flow == "accumulating" and net_flow != "accumulating":
-                continue
+                return None
             if flow == "distributing" and net_flow != "distributing":
-                continue
+                return None
 
-            results.append({
+            # Recency filter: at least one holder must have a recent filing
+            most_recent = max(
+                (h["date_reported"] for h in data["holders"] if h.get("date_reported")),
+                default=""
+            )
+            if most_recent and most_recent < cutoff:
+                return None
+
+            return {
                 "ticker": ticker,
                 "institutional_pct": inst_pct,
                 "avg_change_pct": avg_change,
                 "net_flow": net_flow,
                 "buyer_count": data["summary"]["buyers_count"],
                 "seller_count": data["summary"]["sellers_count"],
-            })
+                "last_filing": most_recent,
+            }
         except Exception:
-            continue
+            return None
+
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futs = [pool.submit(_check, t) for t in SCREENER_UNIVERSE]
+        for f in _as_completed(futs):
+            r = f.result()
+            if r:
+                results.append(r)
 
     results.sort(key=lambda r: r["avg_change_pct"], reverse=True)
     _cache.set(cache_key, results)

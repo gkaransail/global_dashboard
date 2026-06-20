@@ -69,29 +69,33 @@ function SkeletonRow() {
 }
 
 export default function TradeFeed() {
-  const ticker    = useStore(s => s.ticker)
-  const setTicker = useStore(s => s.setTicker)
+  const setGlobalTicker = useStore(s => s.setTicker)
 
-  const [days, setDays]       = useState(90)
-  const [chamber, setChamber] = useState('All')
-  const [txType, setTxType]   = useState('All')
-  const [data, setData]       = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState(null)
+  const [days, setDays]                   = useState(90)
+  const [chamber, setChamber]             = useState('All')
+  const [txType, setTxType]               = useState('All')
+  const [tickerInput, setTickerInput]     = useState('')
+  const [tickerFilter, setTickerFilter]   = useState('')
+  const [data, setData]                   = useState(null)
+  const [loading, setLoading]             = useState(false)
+  const [error, setError]                 = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const p = new URLSearchParams({ days, limit: 200 })
-      if (ticker) p.set('ticker', ticker)
+      const p = new URLSearchParams({ days, limit: 300 })
+      if (tickerFilter) p.set('ticker', tickerFilter)
       if (chamber !== 'All') p.set('chamber', chamber.toLowerCase())
       if (txType  !== 'All') p.set('transaction_type', txType)
       setData(await api.get(`/congress/feed?${p}`))
     } catch (e) { setError(e.message || 'Failed to load') }
     finally { setLoading(false) }
-  }, [ticker, days, chamber, txType])
+  }, [tickerFilter, days, chamber, txType])
 
   useEffect(() => { load() }, [load])
+
+  const applyTickerFilter = () => setTickerFilter(tickerInput.trim().toUpperCase())
+  const clearTickerFilter = () => { setTickerFilter(''); setTickerInput('') }
 
   const trades  = data?.trades || []
   const total   = data?.total ?? 0
@@ -125,6 +129,18 @@ export default function TradeFeed() {
           <span style={{ fontSize: 11, color: 'var(--muted)', marginRight: 2 }}>Window:</span>
           {DAYS_OPTIONS.map(d => <FilterBtn key={d} value={`${d}d`} active={days === d} onClick={() => setDays(d)} />)}
         </div>
+        {/* Ticker search */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input
+            value={tickerInput}
+            onChange={e => setTickerInput(e.target.value.toUpperCase())}
+            onKeyDown={e => e.key === 'Enter' && applyTickerFilter()}
+            placeholder="Filter ticker…"
+            style={{ background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '5px 10px', fontSize: 12, width: 120 }}
+          />
+          <FilterBtn value="Filter" active={false} onClick={applyTickerFilter} />
+          {tickerFilter && <FilterBtn value={`${tickerFilter} ×`} active onClick={clearTickerFilter} />}
+        </div>
         <span style={{ color: 'var(--muted)', fontSize: 12, marginLeft: 'auto' }}>
           {trades.length} of {total} trades
         </span>
@@ -132,14 +148,6 @@ export default function TradeFeed() {
           {loading ? '⟳' : '↻ Refresh'}
         </button>
       </div>
-
-      {/* Ticker filter chip */}
-      {ticker && (
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '4px 12px', background: 'var(--accent-dim)', border: '1px solid rgba(99,102,241,.25)', borderRadius: 6, fontSize: 12, color: 'var(--accent-hi)' }}>
-          Filtered to <strong>{ticker}</strong>
-          <button onClick={() => setTicker('AAPL')} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 14, padding: 0 }}>×</button>
-        </div>
-      )}
 
       {error && <div className="error-box" style={{ marginBottom: 14 }}>⚠️ {error} <button onClick={load} style={{ background: 'none', border: 'none', color: 'var(--bear)', textDecoration: 'underline', cursor: 'pointer' }}>Retry</button></div>}
 
@@ -194,7 +202,7 @@ export default function TradeFeed() {
 
                   {/* Ticker */}
                   <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                    <button onClick={() => setTicker(trade.ticker)} title={trade.asset_description || trade.ticker} style={{
+                    <button onClick={() => { setGlobalTicker(trade.ticker); setTickerInput(trade.ticker); setTickerFilter(trade.ticker) }} title={trade.asset_description || trade.ticker} style={{
                       background: 'var(--surface2)', border: '1px solid var(--border-hi)', borderRadius: 4,
                       color: 'var(--accent-hi)', fontWeight: 800, fontSize: 12, padding: '2px 8px',
                       cursor: 'pointer', fontFamily: 'inherit', letterSpacing: '0.3px', transition: 'border-color 0.15s',

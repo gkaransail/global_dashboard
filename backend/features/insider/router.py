@@ -1,14 +1,20 @@
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+
 import yfinance as yf
 from fastapi import APIRouter, HTTPException, Query
 
 from features.insider import fetcher
-from features.insider.cluster import run_cluster_scan
+from features.insider.cluster import run_cluster_scan, UNIVERSE
 from core import cache as _cache
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 FEED_CACHE_TTL = 21600   # 6 hours — Form 4 data changes infrequently
 SUMMARY_CACHE_TTL = 21600
+RECENT_CACHE_TTL = 7200  # 2 hours
 
 
 @router.get("/feed/{ticker}")
@@ -74,6 +80,52 @@ async def ticker_summary(
         summary = fetcher.fetch_summary(sym, days=days)
         _cache.set(cache_key, summary)
         return summary
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/recent")
+async def recent_feed(
+    days: int = Query(30, ge=1, le=365, description="Look-back window in days"),
+    tx_type: str = Query("all", description="Filter: all | Buy | Sell"),
+    limit: int = Query(300, ge=1, le=1000, description="Max transactions to return"),
+):
+    """
+    All insider transactions across the tracked universe within the last N days.
+    Scans all tickers in parallel and returns a flat feed sorted date-descending.
+    Cached for 2 hours.
+    """
+    cache_key = f"insider_recent_{days}_{tx_type}_{limit}"
+    cached = _cache.get(cache_key, ttl=RECENT_CACHE_TTL)
+    if cached:
+        return cached
+
+    try:
+        all_txs: list[dict] = []
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            futs = {pool.submit(fetcher.fetch_transactions, sym, days): sym for sym in UNIVERSE}
+            for f in as_completed(futs):
+                try:
+                    all_txs.extend(f.result())
+                except Exception as exc:
+                    logger.debug(f"Ticker scan error: {exc}")
+
+        if tx_type.lower() != "all":
+            all_txs = [t for t in all_txs if t["transaction_type"].lower() == tx_type.lower()]
+
+        all_txs.sort(key=lambda t: t.get("date", ""), reverse=True)
+        page = all_txs[:limit]
+
+        result = {
+            "days": days,
+            "universe_size": len(UNIVERSE),
+            "total": len(all_txs),
+            "count": len(page),
+            "last_updated": datetime.utcnow().isoformat() + "Z",
+            "transactions": page,
+        }
+        _cache.set(cache_key, result)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

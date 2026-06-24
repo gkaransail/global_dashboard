@@ -66,6 +66,19 @@ export const FEATURES = [
 
   // ── MARKET ────────────────────────────────────────────────────────────────
   {
+    id: 'volume_profile',
+    label: 'Volume Profile',
+    icon: '📊',
+    status: 'live',
+    section: 'analysis',
+    timeframe: 'short',
+    description: 'Price-level volume histogram with POC, Value Area, VWAP, and buy/sell delta flow.',
+    subOptions: [
+      { id: 'profile', label: '📊 Volume Profile', icon: '📊', path: '/volume_profile/profile' },
+      { id: 'delta',   label: 'Δ Delta Flow',      icon: 'Δ',  path: '/volume_profile/delta'   },
+    ],
+  },
+  {
     id: 'earnings',
     label: 'Earnings Calendar',
     icon: '📅',

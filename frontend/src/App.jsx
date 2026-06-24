@@ -20,6 +20,7 @@ import AlertsFeature from './features/alerts/index'
 import BacktestFeature from './features/backtest/index'
 import LeaderboardFeature from './features/leaderboard/index'
 import QuantWorkbench from './features/quant/index'
+import VolumeProfileFeature from './features/volume_profile/index'
 
 export default function App() {
   return (
@@ -48,6 +49,7 @@ export default function App() {
             <Route path="/backtest/*"      element={<BacktestFeature />} />
             <Route path="/leaderboard/*"   element={<LeaderboardFeature />} />
             <Route path="/quant/*"         element={<QuantWorkbench />} />
+            <Route path="/volume_profile/*" element={<VolumeProfileFeature />} />
             {/* Smart Money merged into Stock Rankings — redirect old URLs */}
             <Route path="/smart_money/*"   element={<Navigate to="/market_intel/smart_money" replace />} />
             <Route path="*"                element={<Navigate to="/" replace />} />

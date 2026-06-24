@@ -55,6 +55,7 @@ FEATURE_FLAGS: dict[str, str] = {
     "portfolio":       "free",
     "alerts":          "free",
     "institutional":   "free",
+    "volume_profile":  "free",
 }
 
 

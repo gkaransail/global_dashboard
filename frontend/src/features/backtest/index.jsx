@@ -61,6 +61,7 @@ const SOURCE_BADGE = {
   options_analysis: { bg: 'rgba(100,116,139,0.15)', color: '#94a3b8', label: 'analysis' },
   quant:            { bg: 'rgba(192,132,252,0.15)', color: '#c084fc', label: 'quant' },
   leaderboard:      { bg: 'rgba(56,189,248,0.15)', color: '#38bdf8', label: 'leaderboard' },
+  order_flow:       { bg: 'rgba(20,184,166,0.15)',  color: '#2dd4bf', label: 'order flow' },
 }
 function SourceBadge({ source }) {
   const key = (source || '').startsWith('leaderboard') ? 'leaderboard' : source
@@ -85,6 +86,7 @@ const QUANT_MODEL_LABELS = {
   fundamental_health: 'Fundamental Health',
   ensemble:         'Ensemble',
   options:          'Options Analysis',
+  order_flow:       'Order Flow (Intraday)',
 }
 
 function WinRateBar({ pct, total }) {
@@ -142,7 +144,7 @@ function SignalRow({ rank, s }) {
   )
 }
 
-function ComparePanel({ running, onScanQuant }) {
+function ComparePanel({ running, onScanQuant, onScanOrderFlow }) {
   const [signals,  setSignals]  = useState(null)
   const [loading,  setLoading]  = useState(false)
   const [msg,      setMsg]      = useState(null)
@@ -187,6 +189,13 @@ function ComparePanel({ running, onScanQuant }) {
           style={{ padding: '6px 14px', borderRadius: 7, background: '#7c3aed', color: '#fff', border: 'none', fontSize: 12, fontWeight: 700, cursor: running ? 'not-allowed' : 'pointer', opacity: running ? 0.6 : 1 }}
         >
           🧮 Scan Watchlist with Quant Models
+        </button>
+        <button
+          onClick={async () => { setMsg(null); await onScanOrderFlow(); load() }}
+          disabled={running}
+          style={{ padding: '6px 14px', borderRadius: 7, background: '#0d9488', color: '#fff', border: 'none', fontSize: 12, fontWeight: 700, cursor: running ? 'not-allowed' : 'pointer', opacity: running ? 0.6 : 1 }}
+        >
+          🌊 Scan Order Flow
         </button>
         <button onClick={load} disabled={loading} style={{ padding: '6px 12px', borderRadius: 7, background: 'var(--surface2)', color: 'var(--text)', border: '1px solid var(--border)', fontSize: 12, cursor: 'pointer' }}>
           ↻ Refresh
@@ -558,6 +567,16 @@ function BacktestDashboard() {
     finally { setRunning(false) }
   }
 
+  async function runScanOrderFlow() {
+    setRunning(true); setMsg(null)
+    try {
+      const r = await api.post('/backtest/scan-order-flow', {})
+      setMsg({ type: 'ok', text: `Order flow scan: ${r.scanned} predictions logged, ${r.skipped} skipped. ${r.errors?.length || 0} errors.` })
+      await loadAll()
+    } catch (e) { setMsg({ type: 'error', text: e.message }) }
+    finally { setRunning(false) }
+  }
+
   async function runTrain() {
     setRunning(true); setMsg(null)
     try {
@@ -617,6 +636,9 @@ function BacktestDashboard() {
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <button onClick={runScanWatchlist} disabled={running} style={actionBtn('#0ea5e9')} title={`Scan ${watchlist.length} watchlist tickers`}>
           📋 Scan Watchlist ({watchlist.length})
+        </button>
+        <button onClick={runScanOrderFlow} disabled={running} style={actionBtn('#0d9488')} title="Log intraday order flow predictions for all watchlist tickers">
+          🌊 Scan Order Flow
         </button>
         <button onClick={runEvaluate}  disabled={running} style={actionBtn('var(--accent)')}>
           ▶ Evaluate Matured
@@ -707,7 +729,7 @@ function BacktestDashboard() {
         </div>
 
         {tab === 'compare' && (
-          <ComparePanel running={running} onScanQuant={runScanQuant} />
+          <ComparePanel running={running} onScanQuant={runScanQuant} onScanOrderFlow={runScanOrderFlow} />
         )}
 
         {tab === 'evaluated' && (

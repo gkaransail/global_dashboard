@@ -170,6 +170,95 @@ def scan_quant():
     }
 
 
+# ── Order Flow Scan ──────────────────────────────────────────────────────────
+
+@router.post("/scan-order-flow")
+def scan_order_flow():
+    """
+    Run order flow analysis on each watchlist ticker and log intraday predictions.
+    Direction derived from cumulative delta bias + OFI%. Evaluates next day.
+    """
+    from features.order_flow.router import _fetch, _enrich, _momentum_and_divergence
+    import yfinance as yf
+    from datetime import date, timedelta, datetime as dt, timezone
+
+    db.init_db()
+    tickers = db.get_watchlist()
+    if not tickers:
+        return {"scanned": 0, "errors": [], "message": "Watchlist is empty — add tickers first"}
+
+    today   = date.today().isoformat()
+    scanned = 0
+    skipped = 0
+    errors  = []
+
+    def _spot(ticker):
+        try:
+            return float(yf.Ticker(ticker).fast_info.last_price or 0) or None
+        except Exception:
+            return None
+
+    for ticker in tickers:
+        with db._conn() as conn:
+            if conn.execute(
+                "SELECT id FROM predictions WHERE ticker=? AND source='order_flow' AND DATE(predicted_at)=? LIMIT 1",
+                (ticker, today)
+            ).fetchone():
+                skipped += 1
+                continue
+        try:
+            df = _fetch(ticker, "1d")
+            if df is None or len(df) < 10:
+                skipped += 1
+                continue
+
+            df = _enrich(df)
+
+            cum_delta = float(df["cum_delta"].iloc[-1])
+            buy_vol   = float(df["buy_vol"].sum())
+            total_vol = float(df["volume"].sum())
+            ofi_pct   = buy_vol / total_vol * 100 if total_vol > 0 else 50.0
+
+            mom = _momentum_and_divergence(df)
+            mom_dir = mom.get("direction", "neutral")
+            accelerating = mom.get("momentum") == "accelerating"
+
+            # Require both delta and OFI to agree; skip mixed signals
+            delta_bull = cum_delta > 0
+            ofi_bull   = ofi_pct > 52
+            ofi_bear   = ofi_pct < 48
+
+            if delta_bull and ofi_bull:
+                direction = 1
+            elif not delta_bull and ofi_bear:
+                direction = -1
+            else:
+                skipped += 1
+                continue
+
+            # Score: OFI strength + momentum boost
+            ofi_strength = abs(ofi_pct - 50) / 50
+            mom_boost    = 0.1 if accelerating and mom_dir == ("bullish" if direction == 1 else "bearish") else 0.0
+            score        = round(min(ofi_strength + mom_boost, 1.0) * direction, 3)
+
+            db.insert_prediction({
+                "ticker":             ticker,
+                "timeframe":          "1d",
+                "predicted_at":       dt.now(timezone.utc).isoformat(),
+                "direction":          direction,
+                "score":              score,
+                "spot_at_prediction": _spot(ticker),
+                "evaluate_after":     (date.today() + timedelta(days=1)).isoformat(),
+                "source":             "order_flow",
+                "feature":            "order_flow",
+            })
+            scanned += 1
+        except Exception as e:
+            errors.append({"ticker": ticker, "error": str(e)})
+
+    return {"scanned": scanned, "skipped": skipped, "errors": errors[:20], "tickers": tickers}
+
+
 # ── Watchlist ─────────────────────────────────────────────────────────────────
 
 @router.get("/watchlist")

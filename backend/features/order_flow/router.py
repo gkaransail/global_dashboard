@@ -132,7 +132,7 @@ def _plain_english_tape(s: dict, momentum: dict) -> str:
     )
     lines.append(
         f"Price is currently {vwap_rel} VWAP (${vwap:.2f}), which means "
-        f"{'most participants who bought today are in profit' if vwap_rel == 'below' else 'the average participant is currently underwater'}."
+        f"{'buyers who bought at the average session price are in profit — a bullish sign' if vwap_rel == 'above' else 'buyers who bought at the average session price are underwater — a bearish sign'}."
     )
     if mom:
         lines.append(f"Delta momentum is {mom} — buying/selling pressure is {mom.split()[0]} in the last 10 bars.")

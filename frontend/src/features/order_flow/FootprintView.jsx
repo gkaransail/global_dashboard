@@ -158,8 +158,62 @@ export default function FootprintView() {
 
       {data && <>
 
-        {/* Reading */}
-        <div className="card card-sm" style={{ borderLeft: `3px solid ${data.total_delta >= 0 ? BULL : BEAR}`, fontSize: 13, lineHeight: 1.7, color: 'var(--text-dim)' }}>
+        {/* Target Price — hero card */}
+        {data.target && (() => {
+          const t = data.target
+          const bull = t.direction === 'bullish'
+          const confColor = t.confidence === 'high' ? BULL : t.confidence === 'medium' ? AMBER : DIM
+          return (
+            <div className="card" style={{ borderLeft: `4px solid ${bull ? BULL : BEAR}`, padding: '16px 18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+
+                {/* Left: target price */}
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6, fontWeight: 600, letterSpacing: '0.06em' }}>
+                    ORDER FLOW TARGET · {data.ticker} · {data.timeframe.toUpperCase()}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+                    <span style={{ fontSize: 36, fontWeight: 800, color: bull ? BULL : BEAR, fontFamily: 'JetBrains Mono,monospace' }}>
+                      {fmtPrice(t.price)}
+                    </span>
+                    <span style={{ fontSize: 14, color: bull ? BULL : BEAR, fontWeight: 600 }}>
+                      {bull ? '▲' : '▼'} {t.distance_pct > 0 ? '+' : ''}{t.distance_pct}%
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 6, maxWidth: 420, lineHeight: 1.6 }}>
+                    {t.scenario}
+                  </div>
+                </div>
+
+                {/* Right: confidence + stop */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 180 }}>
+                  <div className="card card-sm" style={{ padding: '10px 14px' }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>CONFIDENCE</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: confColor, textTransform: 'uppercase', fontFamily: 'JetBrains Mono,monospace' }}>
+                      {t.confidence}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3, lineHeight: 1.4 }}>{t.confidence_note}</div>
+                  </div>
+                  <div className="card card-sm" style={{ padding: '10px 14px', borderLeft: `2px solid ${bull ? BEAR : BULL}` }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>STOP / INVALIDATION</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: bull ? BEAR : BULL, fontFamily: 'JetBrains Mono,monospace' }}>
+                      {fmtPrice(t.stop_zone)}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3, lineHeight: 1.4 }}>{t.stop_note}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Basis tag */}
+              <div style={{ marginTop: 12, fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>
+                Basis: {t.basis}
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* Plain English Reading */}
+        <div className="card card-sm" style={{ borderLeft: `3px solid ${data.total_delta >= 0 ? BULL : BEAR}`, fontSize: 13, lineHeight: 1.8, color: 'var(--text-dim)' }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6, fontWeight: 600, letterSpacing: '0.05em' }}>READING</div>
           {data.reading}
         </div>
@@ -167,13 +221,13 @@ export default function FootprintView() {
         {/* Key stats */}
         <div className="card-grid-4" style={{ gap: 10 }}>
           {[
-            { label: 'POC (most vol traded)', value: fmtPrice(data.poc_price), color: AMBER,
-              sub: 'Price likely to revisit this level' },
+            { label: 'POC — most volume', value: fmtPrice(data.poc_price), color: AMBER,
+              sub: 'Price gravitates back here' },
             { label: 'Value Area', value: `${fmtPrice(data.value_area_low)} – ${fmtPrice(data.value_area_high)}`,
-              color: ACCENT, sub: '70% of today\'s volume traded here' },
+              color: ACCENT, sub: '70% of today\'s volume' },
             { label: 'Net Delta', value: (data.total_delta >= 0 ? '+' : '') + fmtVol(data.total_delta),
               color: data.total_delta >= 0 ? BULL : BEAR,
-              sub: data.total_delta >= 0 ? 'Net buying pressure' : 'Net selling pressure' },
+              sub: data.total_delta >= 0 ? 'Net buying' : 'Net selling' },
             { label: 'Spot vs VWAP', value: fmtPrice(data.spot), color: data.spot >= data.vwap ? BULL : BEAR,
               sub: `${data.spot >= data.vwap ? '▲ above' : '▼ below'} VWAP ${fmtPrice(data.vwap)}` },
           ].map(c => (

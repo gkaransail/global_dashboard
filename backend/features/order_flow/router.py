@@ -278,6 +278,104 @@ async def large_prints(
 
 # ── Footprint ───────────────────────────────────────────────────────────────
 
+def _compute_target(
+    spot: float, poc: float, val: float, vah: float,
+    va_range: float, total_delta: int, buy_pct: float,
+    df
+) -> dict:
+    bullish   = total_delta > 0
+    in_va     = val <= spot <= vah
+    above_poc = spot > poc
+
+    # ── Primary target: where is delta pulling price? ──────────────────
+    if bullish:
+        if spot > vah:
+            # Already broke above VA — target is the extension (0.5× VA range above VAH)
+            target_price = round(vah + va_range * 0.5, 2)
+            basis        = f"Bullish breakout above Value Area (${vah:.2f}). Target = VA extension."
+            scenario     = f"Price broke out above the top of the Value Area. Buyers are in full control. The next magnet is ${target_price:.2f} — roughly half the day's VA range projected above the breakout."
+        elif above_poc:
+            # Inside VA, above POC — heading for VAH
+            target_price = round(vah, 2)
+            basis        = f"Inside VA, above POC (${poc:.2f}). Target = Value Area High."
+            scenario     = f"Price is in the upper half of the Value Area with buyers in control. The natural target is the top of the Value Area at ${vah:.2f}. Bulls need to hold above POC (${poc:.2f}) to keep this valid."
+        elif in_va:
+            # Inside VA, below POC — first target is POC
+            target_price = round(poc, 2)
+            basis        = f"Inside VA, below POC. Bullish delta → target = POC (${poc:.2f}) first."
+            scenario     = f"Buying pressure exists but price hasn't reclaimed POC yet. The first target is ${poc:.2f} (POC). If that breaks, the full target becomes ${vah:.2f} (VAH)."
+        else:
+            # Below VA with bullish delta — mean reversion back into VA
+            target_price = round(val, 2)
+            basis        = f"Below Value Area. Bullish delta → target = VAL reversion (${val:.2f})."
+            scenario     = f"Price is below fair value with buyers pushing back. A return to the Value Area Low (${val:.2f}) is the near-term target — this would be a mean-reversion move back into equilibrium."
+    else:
+        if spot < val:
+            # Below VA already — target is extension
+            target_price = round(val - va_range * 0.5, 2)
+            basis        = f"Bearish breakdown below Value Area (${val:.2f}). Target = VA extension."
+            scenario     = f"Price broke down below the Value Area. Sellers are in full control. The next magnet is ${target_price:.2f} — half the VA range projected below the breakdown."
+        elif not above_poc:
+            # Inside VA, below POC — heading for VAL
+            target_price = round(val, 2)
+            basis        = f"Inside VA, below POC (${poc:.2f}). Target = Value Area Low."
+            scenario     = f"Price is in the lower half of the Value Area with sellers in control. The natural target is the bottom of the Value Area at ${val:.2f}. Bears need to keep price below POC (${poc:.2f}) to keep this valid."
+        elif in_va:
+            # Inside VA, above POC — first target is POC on the way down
+            target_price = round(poc, 2)
+            basis        = f"Inside VA, above POC. Bearish delta → target = POC (${poc:.2f}) first."
+            scenario     = f"Selling pressure exists but price is still above POC. First target on the downside is ${poc:.2f} (POC). If that breaks, the full target becomes ${val:.2f} (VAL)."
+        else:
+            # Above VA with bearish delta — mean reversion back into VA
+            target_price = round(vah, 2)
+            basis        = f"Above Value Area. Bearish delta → target = VAH reversion (${vah:.2f})."
+            scenario     = f"Price is above fair value with sellers pushing back. A return to the Value Area High (${vah:.2f}) is the near-term target — this would be mean-reversion back into equilibrium."
+
+    # ── Stop zone: invalidation level ──────────────────────────────────
+    if bullish:
+        stop_zone = round(val - va_range * 0.2, 2)
+        stop_note = f"A close below ${stop_zone:.2f} (below VAL) would invalidate the bullish setup."
+    else:
+        stop_zone = round(vah + va_range * 0.2, 2)
+        stop_note = f"A close above ${stop_zone:.2f} (above VAH) would invalidate the bearish setup."
+
+    # ── Confidence ─────────────────────────────────────────────────────
+    strength = abs(buy_pct - 50)          # 0–50; higher = more one-sided flow
+    n        = len(df)
+    window   = min(10, n // 2)
+    if n >= window * 2:
+        recent_delta = df["delta"].iloc[-window:].sum()
+        prior_delta  = df["delta"].iloc[-window * 2:-window].sum()
+        accelerating = (abs(recent_delta) > abs(prior_delta) * 1.2 and
+                        (recent_delta > 0) == bullish)
+    else:
+        accelerating = False
+
+    if strength >= 8 and accelerating:
+        confidence      = "high"
+        confidence_note = "Strong one-sided flow with accelerating momentum."
+    elif strength >= 4 or accelerating:
+        confidence      = "medium"
+        confidence_note = "Moderate flow edge. Wait for POC/VA level confirmation."
+    else:
+        confidence      = "low"
+        confidence_note = "Flow is balanced. Target is directional but low conviction."
+
+    distance_pct = round((target_price - spot) / spot * 100, 2)
+
+    return {
+        "price":           target_price,
+        "direction":       "bullish" if bullish else "bearish",
+        "basis":           basis,
+        "scenario":        scenario,
+        "stop_zone":       stop_zone,
+        "stop_note":       stop_note,
+        "confidence":      confidence,
+        "confidence_note": confidence_note,
+        "distance_pct":    distance_pct,
+    }
+
+
 def _value_area(levels: list, target_pct: float = 0.70) -> tuple[float, float]:
     total_vol = sum(l["buy_vol"] + l["sell_vol"] for l in levels)
     if total_vol == 0:
@@ -377,36 +475,79 @@ async def footprint(
         key=lambda x: x["delta"]
     )[:3]
 
-    # Plain English
+    # ── Plain English Reading ─────────────────────────────────────────────
+    bullish      = total_delta > 0
     spot_in_va   = val <= spot <= vah
-    spot_vs_poc  = "at" if abs(spot - poc["price"]) < step else ("above" if spot > poc["price"] else "below")
-    reading_parts = [
-        f"The Point of Control (POC) is ${poc['price']:.2f} — the price where the most volume traded today. "
-        f"Current price is {spot_vs_poc} the POC.",
-    ]
-    reading_parts.append(
-        f"The Value Area (${val:.2f}–${vah:.2f}) contains 70% of today's volume. "
-        f"Price is {'inside' if spot_in_va else 'outside'} the value area — "
-        f"{'this is the current equilibrium zone' if spot_in_va else 'price has extended beyond fair value and may revert to the VA'}."
+    above_poc    = spot > poc["price"]
+    spot_vs_poc  = "at" if abs(spot - poc["price"]) < step else ("above" if above_poc else "below")
+    va_range     = vah - val
+    buy_pct      = round(df["buy_vol"].sum() / df["Volume"].sum() * 100) if df["Volume"].sum() else 50
+
+    r = []
+
+    # POC sentence
+    r.append(
+        f"The Point of Control (POC) is ${poc['price']:.2f} — the single price level where the most volume "
+        f"changed hands today. Price tends to gravitate back here when momentum fades. "
+        f"Current price (${spot:.2f}) is {spot_vs_poc} the POC."
     )
+
+    # Value Area sentence
+    if spot_in_va:
+        r.append(
+            f"We're inside the Value Area (${val:.2f}–${vah:.2f}), the equilibrium zone where 70% of today's "
+            f"volume traded. {'Buyers control the upper half — watch $' + f'{vah:.2f}' + ' (VAH) as the next ceiling.' if above_poc else 'Price is below the POC — sellers have the edge. Watch $' + f'{val:.2f}' + ' (VAL) as the floor.'}"
+        )
+    elif spot > vah:
+        r.append(
+            f"Price (${spot:.2f}) has broken OUT above the Value Area (top was ${vah:.2f}). "
+            f"This is a bullish breakout — the market is accepting higher prices beyond today's equilibrium. "
+            f"The old VAH (${vah:.2f}) now acts as support."
+        )
+    else:
+        r.append(
+            f"Price (${spot:.2f}) has broken DOWN below the Value Area (bottom was ${val:.2f}). "
+            f"This is a bearish breakdown — price is rejecting fair value. "
+            f"The old VAL (${val:.2f}) now acts as resistance."
+        )
+
+    # Key levels
     if demand_zones:
-        z = demand_zones[0]
-        reading_parts.append(f"Strongest demand zone: ${z['price']:.2f} (buyers dominated with {z['ofi_pct']}% buy flow).")
+        dz = demand_zones[0]
+        r.append(
+            f"Strongest demand zone: ${dz['price']:.2f} — buyers dominated here with {dz['ofi_pct']:.0f}% buy flow. "
+            f"If price pulls back to this level, buyers are likely to defend it."
+        )
     if supply_zones:
-        z = supply_zones[0]
-        reading_parts.append(f"Strongest supply zone: ${z['price']:.2f} (sellers dominated with {100 - z['ofi_pct']:.0f}% sell flow).")
+        sz = supply_zones[0]
+        r.append(
+            f"Strongest supply zone: ${sz['price']:.2f} — sellers dominated here with {100 - sz['ofi_pct']:.0f}% sell flow. "
+            f"If price rallies to this level, sellers are likely to push back."
+        )
+
+    # Delta bias summary
+    r.append(
+        f"Net delta is {total_delta:+,} ({buy_pct}% buying). "
+        f"{'Buyers have been more aggressive overall — the path of least resistance is higher.' if bullish else 'Sellers have been more aggressive overall — the path of least resistance is lower.'}"
+    )
+
+    reading = " ".join(r)
+
+    # ── Target Price ──────────────────────────────────────────────────────
+    target = _compute_target(spot, poc["price"], val, vah, va_range, total_delta, buy_pct, df)
 
     return {
-        "ticker":        ticker.upper(),
-        "timeframe":     timeframe,
-        "spot":          spot,
-        "vwap":          vwap,
-        "poc_price":     poc["price"],
+        "ticker":          ticker.upper(),
+        "timeframe":       timeframe,
+        "spot":            spot,
+        "vwap":            vwap,
+        "poc_price":       poc["price"],
         "value_area_low":  val,
         "value_area_high": vah,
-        "total_delta":   total_delta,
-        "levels":        result_levels,
-        "demand_zones":  demand_zones,
-        "supply_zones":  supply_zones,
-        "reading":       " ".join(reading_parts),
+        "total_delta":     total_delta,
+        "levels":          result_levels,
+        "demand_zones":    demand_zones,
+        "supply_zones":    supply_zones,
+        "reading":         reading,
+        "target":          target,
     }

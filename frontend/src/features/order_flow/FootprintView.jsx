@@ -2,18 +2,14 @@ import { useState } from 'react'
 import { useStore } from '../../core/store'
 import { api } from '../../core/api'
 
-const fmtPrice = (v) => (v == null ? '—' : `$${Number(v).toFixed(2)}`)
-const fmtVol = (v) => {
-  if (v == null) return '—'
-  const abs = Math.abs(v)
-  if (abs >= 1e6) return `${(abs / 1e6).toFixed(1)}M`
-  if (abs >= 1e3) return `${(abs / 1e3).toFixed(0)}K`
-  return String(abs)
-}
+const fmtPrice = (v) => v == null ? '—' : `$${Number(v).toFixed(2)}`
+const fmtVol   = (v) => { if (v == null) return '—'; const a = Math.abs(v); return a >= 1e6 ? `${(a/1e6).toFixed(1)}M` : a >= 1e3 ? `${(a/1e3).toFixed(0)}K` : String(a) }
 
-const BULL = '#10b981'
-const BEAR = '#ef4444'
-const DIM  = '#64748b'
+const BULL   = '#10b981'
+const BEAR   = '#ef4444'
+const ACCENT = '#6366f1'
+const DIM    = '#475569'
+const AMBER  = '#f59e0b'
 
 const TF_OPTIONS = [
   { key: '1d', label: 'Today (1m)' },
@@ -21,87 +17,97 @@ const TF_OPTIONS = [
   { key: '5d', label: '5 Days (5m)' },
 ]
 
-function FootprintChart({ levels, spot, pocPrice }) {
-  if (!levels?.length) return null
+// One row in the footprint: price label + buy bar | sell bar + delta badge
+function FootprintRow({ level, maxTotal, spot, pocPrice, vah, val, step }) {
+  const total  = level.buy_vol + level.sell_vol
+  const buyPct = total ? level.buy_vol / total * 100 : 50
 
-  const maxTotal = Math.max(...levels.map(l => l.buy_vol + l.sell_vol), 1)
-  const ROW_H = 22
-  const BAR_MAX_W = 260
-  const PRICE_COL = 72
-  const VOL_COL   = 68
-  const DELTA_COL = 72
-  const GAP = 4
-  const W = PRICE_COL + BAR_MAX_W + BAR_MAX_W + VOL_COL + DELTA_COL + GAP * 4
-  const H = levels.length * ROW_H + 28
+  const isPOC   = Math.abs(level.price - pocPrice) < step * 0.5
+  const isSpot  = Math.abs(level.price - spot)     < step * 0.5
+  const isVAH   = Math.abs(level.price - vah)      < step * 0.5
+  const isVAL   = Math.abs(level.price - val)      < step * 0.5
+  const inVA    = level.price >= val && level.price <= vah
+
+  const barMaxW = 220
+  const buyW    = (level.buy_vol / maxTotal) * barMaxW
+  const sellW   = (level.sell_vol / maxTotal) * barMaxW
+
+  const imbull  = level.imbalance === 'bullish'
+  const imbear  = level.imbalance === 'bearish'
+
+  const rowBg = isPOC   ? 'rgba(245,158,11,0.1)'
+               : isSpot  ? 'rgba(99,102,241,0.1)'
+               : inVA    ? 'rgba(255,255,255,0.02)'
+               : 'transparent'
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block', maxHeight: 600 }}>
-      {/* Header */}
-      {[
-        { x: PRICE_COL / 2, label: 'Price' },
-        { x: PRICE_COL + BAR_MAX_W / 2, label: 'Buy Vol' },
-        { x: PRICE_COL + BAR_MAX_W + GAP + BAR_MAX_W / 2, label: 'Sell Vol' },
-        { x: PRICE_COL + BAR_MAX_W * 2 + GAP + VOL_COL / 2, label: 'Total' },
-        { x: PRICE_COL + BAR_MAX_W * 2 + GAP + VOL_COL + DELTA_COL / 2, label: 'Δ' },
-      ].map((h, i) => (
-        <text key={i} x={h.x} y={14} fill={DIM} fontSize="10" textAnchor="middle" fontFamily="JetBrains Mono, monospace">
-          {h.label}
-        </text>
-      ))}
+    <div style={{ display: 'flex', alignItems: 'center', minHeight: 24, background: rowBg,
+      borderBottom: '1px solid rgba(255,255,255,0.025)', padding: '2px 0', position: 'relative' }}>
 
-      {levels.map((l, i) => {
-        const y = 22 + i * ROW_H
-        const isSpot = Math.abs(l.price - spot) < 0.25
-        const isPOC  = Math.abs(l.price - pocPrice) < 0.25
-        const total  = l.buy_vol + l.sell_vol
-        const buyW   = (l.buy_vol / maxTotal) * BAR_MAX_W
-        const sellW  = (l.sell_vol / maxTotal) * BAR_MAX_W
-        const rowBg  = isPOC ? 'rgba(245,158,11,0.12)' : isSpot ? 'rgba(99,102,241,0.1)' : i % 2 === 0 ? 'rgba(255,255,255,0.01)' : 'transparent'
+      {/* VA bracket */}
+      {(isVAH || isVAL) && (
+        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3,
+          background: 'rgba(99,102,241,0.6)', borderRadius: isVAH ? '2px 2px 0 0' : '0 0 2px 2px' }} />
+      )}
 
-        return (
-          <g key={i}>
-            <rect x={0} y={y} width={W} height={ROW_H} fill={rowBg} />
+      {/* Price label */}
+      <div style={{ width: 70, textAlign: 'right', paddingRight: 10, fontSize: 11,
+        fontFamily: 'JetBrains Mono,monospace', flexShrink: 0,
+        color: isSpot ? ACCENT : isPOC ? AMBER : inVA ? 'var(--text)' : DIM,
+        fontWeight: (isPOC || isSpot) ? 700 : 400 }}>
+        {fmtPrice(level.price)}
+      </div>
 
-            {/* Price label */}
-            <text x={PRICE_COL - 4} y={y + 14} fill={isSpot ? '#6366f1' : isPOC ? '#f59e0b' : 'var(--text, #e2e8f0)'}
-              fontSize="10" textAnchor="end" fontFamily="JetBrains Mono, monospace" fontWeight={isPOC || isSpot ? '700' : '400'}>
-              {fmtPrice(l.price)}
-            </text>
+      {/* Buy bar (left-expanding) */}
+      <div style={{ width: barMaxW, display: 'flex', justifyContent: 'flex-end', paddingRight: 2, flexShrink: 0 }}>
+        <div style={{ height: 14, width: buyW, background: imbull ? 'rgba(16,185,129,0.9)' : 'rgba(16,185,129,0.35)',
+          borderRadius: 2, minWidth: total > 0 ? 1 : 0, transition: 'width 0.2s' }} />
+      </div>
 
-            {/* Buy bar (right-fill from price col) */}
-            <rect x={PRICE_COL} y={y + 3} width={buyW} height={ROW_H - 6} fill="rgba(16,185,129,0.5)" rx="1" />
-            <text x={PRICE_COL + buyW + 3} y={y + 14} fill={BULL} fontSize="9" fontFamily="JetBrains Mono, monospace">
-              {fmtVol(l.buy_vol)}
-            </text>
+      {/* Center divider */}
+      <div style={{ width: 1, height: 18, background: '#1e293b', flexShrink: 0 }} />
 
-            {/* Sell bar */}
-            <rect x={PRICE_COL + BAR_MAX_W + GAP} y={y + 3} width={sellW} height={ROW_H - 6} fill="rgba(239,68,68,0.5)" rx="1" />
-            <text x={PRICE_COL + BAR_MAX_W + GAP + sellW + 3} y={y + 14} fill={BEAR} fontSize="9" fontFamily="JetBrains Mono, monospace">
-              {fmtVol(l.sell_vol)}
-            </text>
+      {/* Sell bar (right-expanding) */}
+      <div style={{ width: barMaxW, paddingLeft: 2, flexShrink: 0 }}>
+        <div style={{ height: 14, width: sellW, background: imbear ? 'rgba(239,68,68,0.9)' : 'rgba(239,68,68,0.35)',
+          borderRadius: 2, minWidth: total > 0 ? 1 : 0, transition: 'width 0.2s' }} />
+      </div>
 
-            {/* Total vol */}
-            <text x={PRICE_COL + BAR_MAX_W * 2 + GAP + VOL_COL / 2} y={y + 14} fill={DIM} fontSize="9" textAnchor="middle" fontFamily="JetBrains Mono, monospace">
-              {fmtVol(total)}
-            </text>
+      {/* OFI% label */}
+      <div style={{ width: 38, textAlign: 'center', fontSize: 10, fontFamily: 'JetBrains Mono,monospace', flexShrink: 0,
+        color: imbull ? BULL : imbear ? BEAR : DIM, fontWeight: (imbull || imbear) ? 700 : 400 }}>
+        {Math.round(buyPct)}%
+      </div>
 
-            {/* Delta */}
-            <text x={PRICE_COL + BAR_MAX_W * 2 + GAP + VOL_COL + DELTA_COL / 2} y={y + 14}
-              fill={l.delta >= 0 ? BULL : BEAR} fontSize="9" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontWeight="600">
-              {l.delta >= 0 ? '+' : ''}{fmtVol(l.delta)}
-            </text>
+      {/* Delta */}
+      <div style={{ width: 64, textAlign: 'right', paddingRight: 8, fontSize: 10, fontFamily: 'JetBrains Mono,monospace',
+        flexShrink: 0, color: level.delta >= 0 ? BULL : BEAR, fontWeight: 600 }}>
+        {level.delta >= 0 ? '+' : ''}{fmtVol(level.delta)}
+      </div>
 
-            {/* POC / Spot badge */}
-            {isPOC && (
-              <text x={W - 2} y={y + 14} fill="#f59e0b" fontSize="8" textAnchor="end" fontFamily="JetBrains Mono, monospace" fontWeight="700">POC</text>
-            )}
-            {isSpot && !isPOC && (
-              <text x={W - 2} y={y + 14} fill="#6366f1" fontSize="8" textAnchor="end" fontFamily="JetBrains Mono, monospace" fontWeight="700">SPOT</text>
-            )}
-          </g>
-        )
-      })}
-    </svg>
+      {/* Badges */}
+      <div style={{ width: 50, textAlign: 'right', paddingRight: 6, fontSize: 9, flexShrink: 0 }}>
+        {isPOC  && <span style={{ color: AMBER,  fontWeight: 700, fontFamily: 'JetBrains Mono,monospace' }}>POC</span>}
+        {isSpot && !isPOC && <span style={{ color: ACCENT, fontWeight: 700, fontFamily: 'JetBrains Mono,monospace' }}>SPOT</span>}
+        {isVAH  && !isPOC && !isSpot && <span style={{ color: '#94a3b8', fontWeight: 600, fontFamily: 'JetBrains Mono,monospace' }}>VAH</span>}
+        {isVAL  && !isPOC && !isSpot && <span style={{ color: '#94a3b8', fontWeight: 600, fontFamily: 'JetBrains Mono,monospace' }}>VAL</span>}
+        {imbull && !isPOC && !isSpot && <span style={{ color: BULL }}>●</span>}
+        {imbear && !isPOC && !isSpot && <span style={{ color: BEAR }}>●</span>}
+      </div>
+    </div>
+  )
+}
+
+function KeyZoneCard({ zone, type }) {
+  const isDemand = type === 'demand'
+  return (
+    <div className="card card-sm" style={{ borderLeft: `3px solid ${isDemand ? BULL : BEAR}`, fontSize: 12 }}>
+      <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>{isDemand ? '🟢 DEMAND' : '🔴 SUPPLY'}</div>
+      <div style={{ fontWeight: 700, color: isDemand ? BULL : BEAR, fontFamily: 'JetBrains Mono,monospace', fontSize: 14 }}>
+        {fmtPrice(zone.price)}
+      </div>
+      <div style={{ color: 'var(--muted)', marginTop: 3 }}>{zone.ofi_pct}% buy · Δ {zone.delta > 0 ? '+' : ''}{fmtVol(zone.delta)}</div>
+    </div>
   )
 }
 
@@ -118,71 +124,113 @@ export default function FootprintView() {
     if (!ticker.trim()) return
     setLoading(true); setError(null)
     try {
-      const d = await api.get(
-        `/order_flow/footprint/${ticker.trim().toUpperCase()}?timeframe=${tf}&levels=${lvls}`
-      )
-      setData(d)
+      setData(await api.get(`/order_flow/footprint/${ticker.trim().toUpperCase()}?timeframe=${tf}&levels=${lvls}`))
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }
 
+  const levels = data?.levels ?? []
+  const maxTotal = levels.length ? Math.max(...levels.map(l => l.buy_vol + l.sell_vol), 1) : 1
+  const step = levels.length >= 2 ? Math.abs(levels[0].price - levels[1].price) : 0.01
+
   return (
     <div className="pad" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div className="card card-sm" style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.6 }}>
-        <strong style={{ color: 'var(--text)' }}>Footprint Chart</strong> — distributes each bar's
-        estimated buy and sell volume across the price levels it traded through.{' '}
-        <strong style={{ color: '#f59e0b' }}>POC</strong> = Point of Control (most volume traded).{' '}
-        <strong style={{ color: '#6366f1' }}>SPOT</strong> = current price.
-        Price levels with dominant buy delta show active demand; dominant sell delta shows supply.
-      </div>
 
+      {/* Controls */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input
-          value={ticker}
-          onChange={e => setTicker(e.target.value.toUpperCase())}
-          onKeyDown={e => e.key === 'Enter' && load()}
-          placeholder="Ticker"
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 12px', borderRadius: 6, fontSize: 13, width: 120, outline: 'none' }}
-        />
+        <input value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())} onKeyDown={e => e.key === 'Enter' && load()}
+          placeholder="Ticker" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 12px', borderRadius: 6, fontSize: 13, width: 120, outline: 'none' }} />
         <select value={tf} onChange={e => setTf(e.target.value)}
           style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 12px', borderRadius: 6, fontSize: 13 }}>
           {TF_OPTIONS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
         </select>
         <select value={lvls} onChange={e => setLvls(Number(e.target.value))}
           style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 12px', borderRadius: 6, fontSize: 13 }}>
-          {[20, 30, 40, 60].map(v => <option key={v} value={v}>{v} levels</option>)}
+          {[20, 30, 40, 60].map(v => <option key={v} value={v}>{v} price levels</option>)}
         </select>
         <button className="btn-primary" onClick={load} disabled={loading} style={{ minWidth: 130 }}>
           {loading ? 'Building…' : 'Build Footprint'}
         </button>
       </div>
 
-      {error && <div className="error-box">⚠ {error}</div>}
+      {error  && <div className="error-box">⚠ {error}</div>}
       {loading && <div className="spinner-wrap"><div className="spinner" /><span>Distributing volume across price levels…</span></div>}
 
-      {data && (
-        <>
-          <div className="card-grid-4" style={{ gap: 10 }}>
-            {[
-              { label: 'Spot Price', value: `$${Number(data.spot).toFixed(2)}`, color: '#6366f1', sub: 'Current price' },
-              { label: 'POC Price',  value: `$${Number(data.poc_price).toFixed(2)}`, color: '#f59e0b', sub: 'Highest volume level' },
-              { label: 'Net Delta',  value: (data.total_delta >= 0 ? '+' : '') + data.total_delta.toLocaleString(),
-                color: data.total_delta >= 0 ? BULL : BEAR, sub: data.total_delta >= 0 ? 'Net buying' : 'Net selling' },
-              { label: 'Price Levels', value: data.levels.length, color: 'var(--text)', sub: `${tf} window` },
-            ].map(c => (
-              <div key={c.label} className="card card-sm">
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{c.label}</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: c.color, fontFamily: 'JetBrains Mono, monospace' }}>{c.value}</div>
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{c.sub}</div>
-              </div>
-            ))}
+      {data && <>
+
+        {/* Reading */}
+        <div className="card card-sm" style={{ borderLeft: `3px solid ${data.total_delta >= 0 ? BULL : BEAR}`, fontSize: 13, lineHeight: 1.7, color: 'var(--text-dim)' }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6, fontWeight: 600, letterSpacing: '0.05em' }}>READING</div>
+          {data.reading}
+        </div>
+
+        {/* Key stats */}
+        <div className="card-grid-4" style={{ gap: 10 }}>
+          {[
+            { label: 'POC (most vol traded)', value: fmtPrice(data.poc_price), color: AMBER,
+              sub: 'Price likely to revisit this level' },
+            { label: 'Value Area', value: `${fmtPrice(data.value_area_low)} – ${fmtPrice(data.value_area_high)}`,
+              color: ACCENT, sub: '70% of today\'s volume traded here' },
+            { label: 'Net Delta', value: (data.total_delta >= 0 ? '+' : '') + fmtVol(data.total_delta),
+              color: data.total_delta >= 0 ? BULL : BEAR,
+              sub: data.total_delta >= 0 ? 'Net buying pressure' : 'Net selling pressure' },
+            { label: 'Spot vs VWAP', value: fmtPrice(data.spot), color: data.spot >= data.vwap ? BULL : BEAR,
+              sub: `${data.spot >= data.vwap ? '▲ above' : '▼ below'} VWAP ${fmtPrice(data.vwap)}` },
+          ].map(c => (
+            <div key={c.label} className="card card-sm">
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{c.label}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: c.color, fontFamily: 'JetBrains Mono,monospace' }}>{c.value}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>{c.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Key zones */}
+        {(data.demand_zones?.length > 0 || data.supply_zones?.length > 0) && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 11, color: BULL, fontWeight: 600 }}>DEMAND ZONES (buyers dominated)</div>
+              {data.demand_zones.map((z,i) => <KeyZoneCard key={i} zone={z} type="demand" />)}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 11, color: BEAR, fontWeight: 600 }}>SUPPLY ZONES (sellers dominated)</div>
+              {data.supply_zones.map((z,i) => <KeyZoneCard key={i} zone={z} type="supply" />)}
+            </div>
+          </div>
+        )}
+
+        {/* Footprint chart */}
+        <div className="card" style={{ padding: '10px 0' }}>
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', padding: '0 0 6px 0', borderBottom: '1px solid var(--border)', marginBottom: 4, fontSize: 10, color: DIM, fontFamily: 'JetBrains Mono,monospace' }}>
+            <div style={{ width: 70, textAlign: 'right', paddingRight: 10 }}>PRICE</div>
+            <div style={{ width: 220, textAlign: 'right', paddingRight: 8 }}>← BUY VOL</div>
+            <div style={{ width: 1 }} />
+            <div style={{ width: 220, paddingLeft: 8 }}>SELL VOL →</div>
+            <div style={{ width: 38, textAlign: 'center' }}>BUY%</div>
+            <div style={{ width: 64, textAlign: 'right', paddingRight: 8 }}>DELTA</div>
+            <div style={{ width: 50 }} />
           </div>
 
-          <div className="card" style={{ padding: '12px 10px', overflowX: 'auto' }}>
-            <FootprintChart levels={data.levels} spot={data.spot} pocPrice={data.poc_price} />
+          {/* Legend */}
+          <div style={{ display: 'flex', gap: 16, padding: '0 12px 8px', fontSize: 10, color: DIM }}>
+            <span><span style={{ color: AMBER, fontWeight: 700 }}>POC</span> = most volume</span>
+            <span><span style={{ color: ACCENT, fontWeight: 700 }}>SPOT</span> = current price</span>
+            <span><span style={{ color: '#94a3b8' }}>VAH/VAL</span> = value area edges (70% vol)</span>
+            <span><span style={{ color: BULL }}>●</span> = 3:1 buy imbalance</span>
+            <span><span style={{ color: BEAR }}>●</span> = 3:1 sell imbalance</span>
           </div>
-        </>
-      )}
+
+          {/* Rows */}
+          <div style={{ maxHeight: 520, overflowY: 'auto' }}>
+            {levels.map((l, i) => (
+              <FootprintRow key={i} level={l} maxTotal={maxTotal} step={step}
+                spot={data.spot} pocPrice={data.poc_price}
+                vah={data.value_area_high} val={data.value_area_low} />
+            ))}
+          </div>
+        </div>
+      </>}
     </div>
   )
 }

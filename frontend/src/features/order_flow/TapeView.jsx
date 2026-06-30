@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useStore } from '../../core/store'
 import { api } from '../../core/api'
 
 const fmtVol   = (v) => { if (v == null) return '—'; const a = Math.abs(v), s = v < 0 ? '-' : '+'; return a >= 1e6 ? `${s}${(a/1e6).toFixed(1)}M` : a >= 1e3 ? `${s}${(a/1e3).toFixed(0)}K` : `${s}${a}` }
@@ -80,23 +79,14 @@ function OFIBar({ ofi_pct }) {
   )
 }
 
-const TF_OPTIONS = [
-  { key: '1d', label: 'Today (1m)' },
-  { key: '2d', label: '2 Days (2m)' },
-  { key: '5d', label: '5 Days (5m)' },
-]
-
-export default function TapeView() {
-  const { ticker: globalTicker } = useStore()
-  const [ticker, setTicker]   = useState(globalTicker || 'SPY')
-  const [tf, setTf]           = useState('1d')
+export default function TapeView({ ticker, tf }) {
   const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState(null)
   const [showAll, setShowAll] = useState(false)
 
   async function load() {
-    if (!ticker.trim()) return
+    if (!ticker?.trim()) return
     setLoading(true); setError(null)
     try {
       setData(await api.get(`/order_flow/tape/${ticker.trim().toUpperCase()}?timeframe=${tf}`))
@@ -112,18 +102,12 @@ export default function TapeView() {
   return (
     <div className="pad" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-      {/* Controls */}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())} onKeyDown={e => e.key === 'Enter' && load()}
-          placeholder="Ticker" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 12px', borderRadius: 6, fontSize: 13, width: 120, outline: 'none' }} />
-        <select value={tf} onChange={e => setTf(e.target.value)}
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 12px', borderRadius: 6, fontSize: 13 }}>
-          {TF_OPTIONS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
-        </select>
+      {/* Load button */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
         <button className="btn-primary" onClick={load} disabled={loading} style={{ minWidth: 110 }}>
-          {loading ? 'Loading…' : 'Load Tape'}
+          {loading ? 'Loading…' : `Load Tape — ${ticker || '…'}`}
         </button>
-        {s && <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>{bars.length} bars · last bar {fmtTime(bars[bars.length-1]?.time)}</span>}
+        {s && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{bars.length} bars · last {fmtTime(bars[bars.length-1]?.time)}</span>}
       </div>
 
       {error  && <div className="error-box">⚠ {error}</div>}

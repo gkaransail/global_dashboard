@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useStore } from '../../core/store'
 import { api } from '../../core/api'
 
 const fmtPrice = (v) => v == null ? '—' : `$${Number(v).toFixed(2)}`
@@ -95,23 +94,14 @@ function TimelineChart({ prints }) {
   )
 }
 
-const TF_OPTIONS = [
-  { key: '1d', label: 'Today (1m)' },
-  { key: '2d', label: '2 Days (2m)' },
-  { key: '5d', label: '5 Days (5m)' },
-]
-
-export default function LargePrintsView() {
-  const { ticker: globalTicker } = useStore()
-  const [ticker, setTicker]     = useState(globalTicker || 'SPY')
-  const [tf, setTf]             = useState('1d')
+export default function LargePrintsView({ ticker, tf }) {
   const [threshold, setThreshold] = useState(2.0)
   const [data, setData]         = useState(null)
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState(null)
 
   async function load() {
-    if (!ticker.trim()) return
+    if (!ticker?.trim()) return
     setLoading(true); setError(null)
     try {
       setData(await api.get(`/order_flow/large_prints/${ticker.trim().toUpperCase()}?timeframe=${tf}&threshold=${threshold}`))
@@ -129,22 +119,16 @@ export default function LargePrintsView() {
   return (
     <div className="pad" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-      {/* Controls */}
+      {/* Controls — only threshold remains, ticker+tf come from shared bar */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())} onKeyDown={e => e.key === 'Enter' && load()}
-          placeholder="Ticker" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 12px', borderRadius: 6, fontSize: 13, width: 120, outline: 'none' }} />
-        <select value={tf} onChange={e => setTf(e.target.value)}
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 12px', borderRadius: 6, fontSize: 13 }}>
-          {TF_OPTIONS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
-        </select>
         <select value={threshold} onChange={e => setThreshold(Number(e.target.value))}
           style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 12px', borderRadius: 6, fontSize: 13 }}>
           {[1.5, 2, 2.5, 3, 4, 5].map(v => <option key={v} value={v}>{v}× avg vol</option>)}
         </select>
         <button className="btn-primary" onClick={load} disabled={loading} style={{ minWidth: 120 }}>
-          {loading ? 'Scanning…' : 'Scan Prints'}
+          {loading ? 'Scanning…' : `Scan Prints — ${ticker || '…'}`}
         </button>
-        {data && <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>{data.count} prints found</span>}
+        {data && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{data.count} prints found</span>}
       </div>
 
       {error  && <div className="error-box">⚠ {error}</div>}

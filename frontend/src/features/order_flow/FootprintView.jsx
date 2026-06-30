@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useStore } from '../../core/store'
 import { api } from '../../core/api'
 
 const fmtPrice = (v) => v == null ? '—' : `$${Number(v).toFixed(2)}`
@@ -11,11 +10,6 @@ const ACCENT = '#6366f1'
 const DIM    = '#475569'
 const AMBER  = '#f59e0b'
 
-const TF_OPTIONS = [
-  { key: '1d', label: 'Today (1m)' },
-  { key: '2d', label: '2 Days (2m)' },
-  { key: '5d', label: '5 Days (5m)' },
-]
 
 // One row in the footprint: price label + buy bar | sell bar + delta badge
 function FootprintRow({ level, maxTotal, spot, pocPrice, vah, val, step }) {
@@ -111,17 +105,14 @@ function KeyZoneCard({ zone, type }) {
   )
 }
 
-export default function FootprintView() {
-  const { ticker: globalTicker } = useStore()
-  const [ticker, setTicker] = useState(globalTicker || 'SPY')
-  const [tf, setTf]         = useState('1d')
+export default function FootprintView({ ticker, tf }) {
   const [lvls, setLvls]     = useState(30)
   const [data, setData]     = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError]   = useState(null)
 
   async function load() {
-    if (!ticker.trim()) return
+    if (!ticker?.trim()) return
     setLoading(true); setError(null)
     try {
       setData(await api.get(`/order_flow/footprint/${ticker.trim().toUpperCase()}?timeframe=${tf}&levels=${lvls}`))
@@ -136,20 +127,14 @@ export default function FootprintView() {
   return (
     <div className="pad" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-      {/* Controls */}
+      {/* Controls — only levels remains, ticker+tf come from shared bar */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())} onKeyDown={e => e.key === 'Enter' && load()}
-          placeholder="Ticker" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 12px', borderRadius: 6, fontSize: 13, width: 120, outline: 'none' }} />
-        <select value={tf} onChange={e => setTf(e.target.value)}
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 12px', borderRadius: 6, fontSize: 13 }}>
-          {TF_OPTIONS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
-        </select>
         <select value={lvls} onChange={e => setLvls(Number(e.target.value))}
           style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 12px', borderRadius: 6, fontSize: 13 }}>
           {[20, 30, 40, 60].map(v => <option key={v} value={v}>{v} price levels</option>)}
         </select>
         <button className="btn-primary" onClick={load} disabled={loading} style={{ minWidth: 130 }}>
-          {loading ? 'Building…' : 'Build Footprint'}
+          {loading ? 'Building…' : `Build Footprint — ${ticker || '…'}`}
         </button>
       </div>
 

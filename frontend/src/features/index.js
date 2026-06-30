@@ -3,6 +3,20 @@
 export const FEATURES = [
   // ── ANALYSIS ──────────────────────────────────────────────────────────────
   {
+    id: 'order_flow',
+    label: 'Order Flow',
+    icon: '🌊',
+    status: 'live',
+    section: 'analysis',
+    timeframe: 'short',
+    description: 'Intraday tape, large print scanner, absorption detection, and footprint chart.',
+    subOptions: [
+      { id: 'tape',         label: '📋 Tape',         icon: '📋', path: '/order_flow/tape' },
+      { id: 'large_prints', label: '🐳 Large Prints',  icon: '🐳', path: '/order_flow/large_prints' },
+      { id: 'footprint',    label: '👣 Footprint',     icon: '👣', path: '/order_flow/footprint' },
+    ],
+  },
+  {
     id: 'reversal',
     label: 'Reversal Scanner',
     icon: '🔄',

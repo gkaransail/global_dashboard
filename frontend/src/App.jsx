@@ -21,6 +21,7 @@ import BacktestFeature from './features/backtest/index'
 import LeaderboardFeature from './features/leaderboard/index'
 import QuantWorkbench from './features/quant/index'
 import VolumeProfileFeature from './features/volume_profile/index'
+import OrderFlowFeature from './features/order_flow/index'
 
 export default function App() {
   return (
@@ -50,6 +51,7 @@ export default function App() {
             <Route path="/leaderboard/*"   element={<LeaderboardFeature />} />
             <Route path="/quant/*"         element={<QuantWorkbench />} />
             <Route path="/volume_profile/*" element={<VolumeProfileFeature />} />
+            <Route path="/order_flow/*"    element={<OrderFlowFeature />} />
             {/* Smart Money merged into Stock Rankings — redirect old URLs */}
             <Route path="/smart_money/*"   element={<Navigate to="/market_intel/smart_money" replace />} />
             <Route path="*"                element={<Navigate to="/" replace />} />

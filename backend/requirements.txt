@@ -19,5 +19,6 @@ feedparser>=6.0.0
 apscheduler>=3.10.0
 hmmlearn>=0.3.0
 statsmodels>=0.14.0
+arch>=6.0.0
 scikit-learn>=1.4.0
 mcp>=1.28.0

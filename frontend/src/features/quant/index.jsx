@@ -292,6 +292,74 @@ function VIXChart({ chartData }) {
   )
 }
 
+// ── GARCH conditional vol chart ───────────────────────────────────────────────
+
+function GarchVolChart({ chartData }) {
+  const hist = chartData?.cond_vol_series ?? []
+  const fc   = chartData?.forecast_series ?? []
+  const lrVol = chartData?.lr_vol
+  const anchor = chartData?.anchor_vol
+
+  if (hist.length < 10) return null
+
+  const W = 560, H = 90
+  const allVols = [...hist.map(d => d.vol), ...fc.map(d => d.vol), lrVol].filter(Boolean)
+  const minV = Math.max(0, Math.min(...allVols) * 0.9)
+  const maxV = Math.max(...allVols) * 1.1
+  const sy = v => H - ((v - minV) / (maxV - minV)) * H
+  const totalPoints = hist.length + fc.length
+  const sx = i => (i / (totalPoints - 1)) * W
+
+  const histPts  = hist.map((d, i) => `${sx(i)},${sy(d.vol)}`).join(' ')
+  const fcPts    = [
+    `${sx(hist.length - 1)},${sy(anchor ?? hist[hist.length - 1].vol)}`,
+    ...fc.map((d, i) => `${sx(hist.length + i)},${sy(d.vol)}`),
+  ].join(' ')
+
+  const lrY = lrVol != null ? sy(lrVol) : null
+  const divX = (hist.length / totalPoints) * W
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>
+        GARCH(1,1) Conditional Volatility — 6 months + 10-day forecast (annualised %)
+      </div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+        style={{ display: 'block', borderRadius: 6, background: 'var(--surface2)' }}>
+        {/* Forecast zone shading */}
+        <rect x={divX} y={0} width={W - divX} height={H} fill="#ffffff06" />
+        {/* Long-run vol reference line */}
+        {lrY != null && (
+          <g>
+            <line x1={0} y1={lrY} x2={W} y2={lrY} stroke="#fbbf2466" strokeWidth={1} strokeDasharray="4,3" />
+            <text x={W - 3} y={lrY - 3} fontSize={8} fill="#fbbf24aa" textAnchor="end">LR {lrVol}%</text>
+          </g>
+        )}
+        {/* Divider between history and forecast */}
+        <line x1={divX} y1={0} x2={divX} y2={H} stroke="var(--border)" strokeWidth={1} strokeDasharray="3,3" />
+        {/* Historical conditional vol — area fill */}
+        <polygon
+          points={`${histPts} ${sx(hist.length - 1)},${H} ${sx(0)},${H}`}
+          fill="#f8717115"
+        />
+        {/* Historical line */}
+        <polyline points={histPts} fill="none" stroke="#f87171" strokeWidth={1.5} />
+        {/* Forecast line — dashed */}
+        <polyline points={fcPts} fill="none" stroke="#f87171" strokeWidth={1.5} strokeDasharray="5,3" />
+        {/* Current vol dot */}
+        <circle cx={sx(hist.length - 1)} cy={sy(hist[hist.length - 1].vol)} r={3} fill="#f87171" />
+        {/* "Forecast" label */}
+        <text x={divX + 4} y={10} fontSize={8} fill="var(--muted)">Forecast →</text>
+      </svg>
+      <div style={{ display: 'flex', gap: 16, marginTop: 4, fontSize: 11 }}>
+        <span style={{ color: '#f87171' }}>— Conditional Vol</span>
+        <span style={{ color: '#f87171', opacity: 0.6 }}>--- 10d Forecast</span>
+        <span style={{ color: '#fbbf24' }}>--- Long-Run Vol</span>
+      </div>
+    </div>
+  )
+}
+
 // ── Factor beta bars ──────────────────────────────────────────────────────────
 
 function FactorBars({ chartData }) {
@@ -871,6 +939,9 @@ function ResultCard({ result }) {
               <RealizedVolChart chartData={result.chart_data} />
             </>
           )}
+          {result.model_id === 'garch' && result.chart_data && (
+            <GarchVolChart chartData={result.chart_data} />
+          )}
           {result.model_id === 'factor_model' && result.chart_data && (
             <>
               <FactorBars chartData={result.chart_data} />
@@ -989,6 +1060,52 @@ function ResultCard({ result }) {
                 <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 4 }}>
                   {result.meta.vol_term_structure}
                 </span>
+              </div>
+            </div>
+          )}
+
+          {/* GARCH key stats */}
+          {result.model_id === 'garch' && result.meta && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                {[
+                  { label: 'Cond. Vol', value: `${result.meta.current_cond_vol}%`, color: result.meta.current_cond_vol > result.meta.lr_vol * 1.3 ? 'var(--bear)' : result.meta.current_cond_vol < result.meta.lr_vol * 0.75 ? 'var(--bull)' : 'var(--text)' },
+                  { label: 'Long-Run Vol', value: `${result.meta.lr_vol}%`, color: 'var(--text)' },
+                  { label: 'Vol Pct', value: `${result.meta.vol_percentile}th`, color: result.meta.vol_percentile > 75 ? 'var(--bear)' : result.meta.vol_percentile < 25 ? 'var(--bull)' : 'var(--text)' },
+                  { label: '10d Forecast', value: `${result.meta.fc_10d_avg}%`, color: result.meta.fc_slope > 0.5 ? 'var(--bear)' : result.meta.fc_slope < -0.5 ? 'var(--bull)' : 'var(--text)' },
+                ].map(s => (
+                  <div key={s.label} style={{ flex: '1 1 80px', background: 'var(--surface2)', borderRadius: 8, padding: '8px 10px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>{s.label}</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: s.color }}>{s.value}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Parameters row */}
+              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>Model Parameters</div>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                  {[
+                    { label: 'ω (omega)', value: result.meta.omega },
+                    { label: 'α (alpha)', value: result.meta.alpha },
+                    { label: 'β (beta)', value: result.meta.beta },
+                    { label: 'α+β persist.', value: result.meta.persistence },
+                  ].map(p => (
+                    <div key={p.label} style={{ textAlign: 'center', minWidth: 80 }}>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>{p.label}</div>
+                      <div style={{
+                        fontSize: 13, fontWeight: 800,
+                        color: p.label === 'α+β persist.' && p.value > 0.97 ? 'var(--bear)' : 'var(--text)',
+                      }}>
+                        {p.value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {result.meta.persistence > 0.97 && (
+                  <div style={{ marginTop: 8, fontSize: 11, color: '#fbbf24' }}>
+                    ⚠ Near-integrated process — vol shocks are highly persistent
+                  </div>
+                )}
               </div>
             </div>
           )}

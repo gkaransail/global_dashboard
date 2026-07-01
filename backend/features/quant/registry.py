@@ -10,6 +10,7 @@ from features.quant.models.fundamental   import FundamentalHealthModel
 from features.quant.models.sentiment     import SentimentModel
 from features.quant.models.options_flow  import OptionsFlowModel
 from features.quant.models.ensemble      import EnsembleModel
+from features.quant.models.garch         import GarchModel
 
 _MODELS = [
     RegimeDetectionModel(),
@@ -21,6 +22,7 @@ _MODELS = [
     SentimentModel(),
     OptionsFlowModel(),
     EnsembleModel(),
+    GarchModel(),
 ]
 
 REGISTRY: dict[str, object] = {m.id: m for m in _MODELS}

@@ -360,6 +360,82 @@ function GarchVolChart({ chartData }) {
   )
 }
 
+// ── Confluence score bars ─────────────────────────────────────────────────────
+
+function ConfluenceScoreBars({ chartData, meta }) {
+  const bars = chartData?.score_bars ?? []
+  if (!bars.length) return null
+
+  const COLOR = { options: '#22d3ee', flow: '#a78bfa', combined: '#f0abfc' }
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
+        Directional scores (−1 = max bearish → +1 = max bullish)
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {bars.map(b => {
+          const pct    = Math.abs(b.score) * 50     // max 50% of half-bar
+          const bull   = b.score > 0
+          const color  = b.score > 0.05 ? 'var(--bull)' : b.score < -0.05 ? 'var(--bear)' : 'var(--muted)'
+          const accent = COLOR[b.type] || 'var(--accent)'
+          const isCombined = b.type === 'combined'
+          return (
+            <div key={b.label}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 12, color: accent, width: 130, flexShrink: 0, fontWeight: isCombined ? 800 : 500 }}>
+                  {b.label}
+                </span>
+                <div style={{
+                  flex: 1, display: 'flex', height: isCombined ? 20 : 14,
+                  position: 'relative',
+                  background: 'var(--surface2)', borderRadius: 4,
+                  border: isCombined ? '1px solid var(--border)' : 'none',
+                }}>
+                  <div style={{
+                    position: 'absolute',
+                    left: bull ? '50%' : `${50 - pct}%`,
+                    width: `${pct}%`,
+                    height: '100%',
+                    background: color,
+                    borderRadius: 4,
+                    opacity: isCombined ? 1 : 0.8,
+                  }} />
+                  <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: 'var(--border)' }} />
+                </div>
+                <span style={{
+                  fontSize: isCombined ? 14 : 12,
+                  fontWeight: 800, color,
+                  width: 52, textAlign: 'right', flexShrink: 0,
+                }}>
+                  {b.score > 0 ? '+' : ''}{b.score.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {/* Agreement / conflict badge */}
+      {meta && (
+        <div style={{
+          marginTop: 12, padding: '8px 14px', borderRadius: 8,
+          background: meta.conflict ? '#f8717115' : meta.agreement ? '#4ade8015' : 'var(--surface2)',
+          border: `1px solid ${meta.conflict ? '#f8717140' : meta.agreement ? '#4ade8040' : 'var(--border)'}`,
+          fontSize: 12, color: meta.conflict ? 'var(--bear)' : meta.agreement ? 'var(--bull)' : 'var(--muted)',
+          fontWeight: 700,
+        }}>
+          {meta.conflict
+            ? '⚡ Signal conflict — options and order flow disagree'
+            : meta.agreement
+              ? '✓ Dual confirmation — both sources agree on direction'
+              : '◆ Partial signal — one source is neutral'
+          }
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Factor beta bars ──────────────────────────────────────────────────────────
 
 function FactorBars({ chartData }) {
@@ -942,6 +1018,9 @@ function ResultCard({ result }) {
           {result.model_id === 'garch' && result.chart_data && (
             <GarchVolChart chartData={result.chart_data} />
           )}
+          {result.model_id === 'confluence' && result.chart_data && (
+            <ConfluenceScoreBars chartData={result.chart_data} meta={result.meta} />
+          )}
           {result.model_id === 'factor_model' && result.chart_data && (
             <>
               <FactorBars chartData={result.chart_data} />
@@ -1104,6 +1183,64 @@ function ResultCard({ result }) {
                 {result.meta.persistence > 0.97 && (
                   <div style={{ marginTop: 8, fontSize: 11, color: '#fbbf24' }}>
                     ⚠ Near-integrated process — vol shocks are highly persistent
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Confluence key stats */}
+          {result.model_id === 'confluence' && result.meta && (
+            <div style={{ marginTop: 14 }}>
+              {/* Score tiles */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                {[
+                  { label: 'Options Score', value: `${result.meta.options_score > 0 ? '+' : ''}${result.meta.options_score?.toFixed(2)}`, color: result.meta.options_score > 0.1 ? 'var(--bull)' : result.meta.options_score < -0.1 ? 'var(--bear)' : 'var(--muted)' },
+                  { label: 'Flow Score',    value: `${result.meta.flow_score > 0 ? '+' : ''}${result.meta.flow_score?.toFixed(2)}`,    color: result.meta.flow_score > 0.1 ? 'var(--bull)' : result.meta.flow_score < -0.1 ? 'var(--bear)' : 'var(--muted)' },
+                  { label: 'Combined',      value: `${result.meta.combined_score > 0 ? '+' : ''}${result.meta.combined_score?.toFixed(2)}`, color: result.meta.combined_score > 0.1 ? 'var(--bull)' : result.meta.combined_score < -0.1 ? 'var(--bear)' : 'var(--muted)' },
+                  { label: 'PC_ATM',        value: result.meta.pc_atm != null ? result.meta.pc_atm.toFixed(2) : '—', color: result.meta.pc_atm < 0.8 ? 'var(--bull)' : result.meta.pc_atm > 1.2 ? 'var(--bear)' : 'var(--text)' },
+                ].map(s => (
+                  <div key={s.label} style={{ flex: '1 1 80px', background: 'var(--surface2)', borderRadius: 8, padding: '8px 10px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>{s.label}</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: s.color }}>{s.value}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Flow context row */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                {[
+                  { label: 'Cum Delta',  value: result.meta.cum_delta != null ? (result.meta.cum_delta > 0 ? '+' : '') + result.meta.cum_delta.toLocaleString() : '—', color: result.meta.cum_delta > 0 ? 'var(--bull)' : result.meta.cum_delta < 0 ? 'var(--bear)' : 'var(--muted)' },
+                  { label: 'vs VWAP',   value: result.meta.vwap_pct != null ? `${result.meta.vwap_pct > 0 ? '+' : ''}${result.meta.vwap_pct.toFixed(2)}%` : '—', color: result.meta.vwap_pct > 0 ? 'var(--bull)' : 'var(--bear)' },
+                  { label: 'Max Pain',  value: result.meta.max_pain != null ? `$${result.meta.max_pain}` : '—', color: 'var(--text)' },
+                  { label: 'GEX Env',   value: result.meta.gex_env ?? '—', color: result.meta.gex_env === 'negative' ? 'var(--bear)' : result.meta.gex_env === 'positive' ? 'var(--bull)' : 'var(--muted)' },
+                ].map(s => (
+                  <div key={s.label} style={{ flex: '1 1 80px', background: 'var(--surface2)', borderRadius: 8, padding: '8px 10px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>{s.label}</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: s.color }}>{s.value}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Special flags */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {result.meta.squeeze && (
+                  <div style={{ padding: '6px 12px', borderRadius: 8, background: '#fbbf2420', border: '1px solid #fbbf2440', fontSize: 12, color: '#fbbf24', fontWeight: 700 }}>
+                    ⚡ Squeeze candidate
+                  </div>
+                )}
+                {result.meta.divergence === 'bearish' && (
+                  <div style={{ padding: '6px 12px', borderRadius: 8, background: '#f8717120', border: '1px solid #f8717140', fontSize: 12, color: 'var(--bear)', fontWeight: 700 }}>
+                    ⚠ Bearish price/delta divergence
+                  </div>
+                )}
+                {result.meta.divergence === 'bullish' && (
+                  <div style={{ padding: '6px 12px', borderRadius: 8, background: '#4ade8020', border: '1px solid #4ade8040', fontSize: 12, color: 'var(--bull)', fontWeight: 700 }}>
+                    ⚠ Bullish price/delta divergence
+                  </div>
+                )}
+                {result.meta.conflict_note && (
+                  <div style={{ width: '100%', padding: '10px 14px', borderRadius: 8, background: '#f8717108', border: '1px solid #f8717130', fontSize: 12, color: 'var(--text)', lineHeight: 1.6 }}>
+                    <span style={{ color: 'var(--bear)', fontWeight: 700 }}>Conflict: </span>
+                    {result.meta.conflict_note}
                   </div>
                 )}
               </div>

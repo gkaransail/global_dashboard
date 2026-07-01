@@ -11,6 +11,7 @@ from features.quant.models.sentiment     import SentimentModel
 from features.quant.models.options_flow  import OptionsFlowModel
 from features.quant.models.ensemble      import EnsembleModel
 from features.quant.models.garch         import GarchModel
+from features.quant.models.confluence    import OptionsOrderConfluenceModel
 
 _MODELS = [
     RegimeDetectionModel(),
@@ -23,6 +24,7 @@ _MODELS = [
     OptionsFlowModel(),
     EnsembleModel(),
     GarchModel(),
+    OptionsOrderConfluenceModel(),
 ]
 
 REGISTRY: dict[str, object] = {m.id: m for m in _MODELS}
